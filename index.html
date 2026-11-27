@@ -37,6 +37,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .bar .sp{flex:1}
 .ib{width:44px;height:44px;display:grid;place-items:center;border-radius:12px;font-size:18px}
 .ib:active{background:var(--line)}
+.ib.on{background:var(--acc);color:#fff}
 .back{display:flex;align-items:center;gap:2px;color:var(--acc);padding:0 8px;height:44px}
 .scroller{flex:1;overflow-y:auto;padding:0 20px 120px}
 #title{width:100%;border:0;background:none;font:inherit;font-size:26px;font-weight:700;color:var(--ink);outline:0;padding:6px 0}
@@ -217,11 +218,15 @@ async function save() {
 }
 $('#title').addEventListener('input', sched);
 body.addEventListener('input', e => {
-  // Entrée à la fin d'une ligne de structure : la nouvelle ligne redevient normale
+  // Entrée sur une ligne de structure : la nouvelle ligne reste une structure
   if (e.inputType === 'insertParagraph') {
-    const s = getSelection(), n = s.rangeCount && s.getRangeAt(0).startContainer;
-    const b = n && (n.nodeType === 1 ? n : n.parentNode).closest('.st');
-    if (b && body.contains(b) && !b.textContent.trim()) { b.classList.remove('st'); if (!b.classList.length) b.removeAttribute('class'); }
+    const s = getSelection(), line = s.rangeCount && lineAt(s.getRangeAt(0));
+    const blk = line && line.blk;
+    if (blk && !isSt(blk)) {
+      let prev = blk.previousSibling; while (isRec(prev)) prev = prev.previousSibling;
+      if (isSt(prev)) blk.classList.add('st');
+    }
+    stState();
   }
   sched();
 });
@@ -242,7 +247,12 @@ $('#del').onclick = () => ask('Supprimer cette note ?', async () => {
 });
 
 // Sélection / insertion
-document.addEventListener('selectionchange', () => { const s = getSelection(); if (s.rangeCount && body.contains(s.anchorNode)) range = s.getRangeAt(0).cloneRange(); });
+document.addEventListener('selectionchange', () => { const s = getSelection(); if (s.rangeCount && body.contains(s.anchorNode)) { range = s.getRangeAt(0).cloneRange(); stState(); } });
+// Le bouton Structure est allumé quand le curseur est sur une ligne de structure
+function stState() {
+  const line = range && lineAt(range);
+  $('[data-cmd=struct]').classList.toggle('on', !!(line && isSt(line.blk)));
+}
 function placeRange() {
   body.focus();
   const s = getSelection(); s.removeAllRanges();
@@ -374,8 +384,8 @@ function toggleStructure(r) {
   }
   blk.classList.toggle('st');
   if (!blk.classList.length) blk.removeAttribute('class');
-  toast(isSt(blk) ? 'Ligne marquée comme structure' : 'Ligne redevenue normale');
-  sched();
+  toast(isSt(blk) ? 'Structure activée' : 'Structure désactivée');
+  stState(); sched();
 }
 // Place l'enregistrement juste sous sa ligne (après les autres enregistrements de cette ligne)
 function insertRec(c, line) {
