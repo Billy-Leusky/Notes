@@ -22,6 +22,16 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .top h1{margin:0;font-size:34px;line-height:1.1}
 .top p{margin:4px 0 0;color:var(--mute);font-size:15px}
 .top .ver{font-size:12px;opacity:.7}
+.top{display:flex;align-items:flex-start;gap:12px}
+.top>div{flex:1;min-width:0}
+.cloud{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;background:var(--card);border:1px solid var(--line);color:var(--mute);margin-top:2px;position:relative}
+.cloud.on{color:var(--acc)}
+.cloud.err::after{content:"";position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;background:var(--rec)}
+.cloud.busy svg{animation:pulse 1s infinite}
+.sheet .row2{display:flex;gap:8px}
+.sheet .row2 button{flex:1}
+.sheet .alt{background:var(--bg)}
+.sheet input+input{margin-top:8px}
 .search{margin:12px 20px 8px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:0 12px;height:44px}
 .search input{flex:1;border:0;background:none;font:inherit;font-size:16px;color:var(--ink);outline:0;min-width:0}
 .search svg{color:var(--mute);width:18px;height:18px}
@@ -90,7 +100,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 </head>
 <body>
 <section id="list" class="view">
-  <div class="top"><h1>Notes</h1><p><span id="count"></span> <span class="ver">· v6</span></p></div>
+  <div class="top"><div><h1>Notes</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v7</span></p></div><button class="cloud" id="cloud" aria-label="Synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
   <button class="fab" id="new" aria-label="Nouvelle note"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -120,8 +130,12 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 
 <div id="recbar" class="recbar hidden"><span class="dot"></span><span class="tm" id="tm">0:00</span><button class="pause" id="pause">Pause</button><button id="stop">Arrêter</button></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 (async () => {
+// ---------- Configuration de la synchronisation (projet Supabase) ----------
+const SB_URL = '';
+const SB_KEY = '';
 const $ = s => document.querySelector(s);
 const body = $('#body');
 const I = {
@@ -164,11 +178,11 @@ const fmt = s => { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + Str
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dfmt = t => new Date(t).toLocaleString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-let notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {}, blobs = {};
+let touched = false, notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {}, blobs = {};
 
 // ---------- Liste ----------
 async function renderList() {
-  notes = (await allNotes()).sort((a, b) => b.updated - a.updated);
+  notes = (await allNotes()).filter(n => !n.deleted).sort((a, b) => b.updated - a.updated);
   const q = $('#q').value.trim().toLowerCase();
   const list = notes.filter(n => !q || ((n.title || '') + ' ' + (n.text || '')).toLowerCase().includes(q));
   $('#count').textContent = notes.length + (notes.length > 1 ? ' notes' : ' note');
@@ -181,7 +195,7 @@ $('#new').onclick = () => openNote({ id: uid(), title: '', html: '', text: '', r
 
 // ---------- Éditeur ----------
 async function openNote(n) {
-  cur = n; dirty = false; range = null;
+  cur = n; dirty = false; touched = false; range = null;
   $('#title').value = n.title || '';
   body.innerHTML = n.html || '';
   $('#date').textContent = dfmt(n.updated);
@@ -202,7 +216,7 @@ function showList() {
   $('#editor').classList.add('hidden'); $('#list').classList.remove('hidden');
   renderList();
 }
-function sched() { dirty = true; clearTimeout(saveT); saveT = setTimeout(save, 400); }
+function sched() { dirty = touched = true; clearTimeout(saveT); saveT = setTimeout(save, 400); }
 async function save() {
   clearTimeout(saveT);
   if (!cur || !dirty) return; dirty = false;
@@ -216,6 +230,7 @@ async function save() {
   cur.updated = Date.now();
   await putNote(cur);
   $('#date').textContent = dfmt(cur.updated);
+  syncSoon();
 }
 $('#title').addEventListener('input', sched);
 body.addEventListener('input', e => {
@@ -237,14 +252,14 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) save(
 $('#back').onclick = async () => {
   if (rec) await stopRec();
   await save();
-  if (cur && !cur.title && !(cur.text || '').trim() && !cur.recs && !$('#title').value.trim() && !body.textContent.trim() && !body.querySelector('.rec')) await delNote(cur.id);
-  cur = null; showList();
+  if (cur && !cur.title && !(cur.text || '').trim() && !cur.recs && !$('#title').value.trim() && !body.textContent.trim() && !body.querySelector('.rec')) await removeNote(cur, []);
+  cur = null; showList(); syncSoon(300);
 };
 $('#del').onclick = () => ask('Supprimer cette note ?', async () => {
   if (rec) await stopRec();
   stopPlay();
-  for (const r of body.querySelectorAll('.rec')) await delAudio(r.dataset.id);
-  await delNote(cur.id); cur = null; dirty = false; showList();
+  await removeNote(cur, [...body.querySelectorAll('.rec')].map(r => r.dataset.id));
+  cur = null; dirty = false; showList(); syncSoon(300);
 });
 
 // Sélection / insertion
@@ -303,7 +318,7 @@ body.addEventListener('click', e => {
   else if (e.target.closest('.x')) {
     ask('Supprimer cet enregistrement ?', async () => {
       if (playing && playing.chip === c) stopPlay();
-      c.remove(); await delAudio(c.dataset.id); sched(); save();
+      c.remove(); await delAudio(c.dataset.id); cloudRemove([c.dataset.id]); sched(); save();
     });
   } else if (e.target.closest('.pl')) togglePlay(c);
 });
@@ -536,6 +551,122 @@ function stopRec() {
     r.mr.stop();
   });
 }
+
+// ---------- Synchronisation entre appareils (Supabase) ----------
+// Notes : table « notes » (dernière modification gagne). Audio : bucket « audio », dossier = utilisateur.
+// Une note supprimée devient une « pierre tombale » (deleted) pour que la suppression se propage.
+const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+let user = null, syncing = null, syncT, lastSync = 0, syncErr = '';
+async function removeNote(n, recIds) {
+  for (const id of recIds) await delAudio(id);
+  cloudRemove(recIds);
+  if (n.synced) await putNote({ id: n.id, deleted: true, updated: Date.now() });
+  else await delNote(n.id);
+}
+function cloudRemove(ids) {
+  if (sb && user && ids.length) sb.storage.from('audio').remove(ids.map(id => user.id + '/' + id)).catch(() => {});
+}
+const recIdsOf = html => { const t = document.createElement('template'); t.innerHTML = html || ''; return [...t.content.querySelectorAll('.rec')].map(r => r.dataset.id); };
+function syncUI() {
+  const c = $('#cloud');
+  c.classList.toggle('on', !!user); c.classList.toggle('busy', !!syncing); c.classList.toggle('err', !!(user && syncErr));
+  $('#sync').textContent = !user ? '' : syncErr ? '· erreur de synchro' : !navigator.onLine ? '· hors ligne' : lastSync ? '· synchronisé ' + new Date(lastSync).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+}
+function syncSoon(ms = 2000) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
+function sync() {
+  if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
+  if (syncing) return syncing.then(() => sync());
+  syncing = doSync().then(() => { syncErr = ''; lastSync = Date.now(); }, e => { syncErr = e.message || String(e); console.warn('sync', e); })
+    .finally(() => { syncing = null; syncUI(); });
+  syncUI();
+  return syncing;
+}
+async function doSync() {
+  const { data: remote, error } = await sb.from('notes').select('*');
+  if (error) throw error;
+  const local = new Map((await allNotes()).map(n => [n.id, n]));
+  const rmap = new Map(remote.map(r => [r.id, r]));
+  let changed = false;
+  // 1. Réception : notes plus récentes sur le serveur
+  for (const r of remote) {
+    const l = local.get(r.id);
+    if (l && l.updated >= r.updated) continue;
+    if (cur && cur.id === r.id && touched) continue; // en cours d'édition ici : on garde la version locale
+    if (r.deleted) {
+      if (l) { for (const id of recIdsOf(l.html)) await delAudio(id); await putNote({ id: r.id, deleted: true, updated: r.updated, synced: r.updated }); changed = true; }
+      continue;
+    }
+    for (const id of recIdsOf(r.html)) {
+      if (await getAudio(id)) continue;
+      const { data, error: e } = await sb.storage.from('audio').download(user.id + '/' + id);
+      if (!e && data) await putAudio({ id, blob: data, d: 0, up: true });
+    }
+    const n = { id: r.id, title: r.title, html: r.html, text: r.text, recs: r.recs, updated: r.updated, synced: r.updated };
+    await putNote(n); changed = true;
+    if (cur && cur.id === n.id && !touched) { const st = $('.scroller').scrollTop; await openNote(n); $('.scroller').scrollTop = st; }
+  }
+  // 2. Envoi : notes modifiées ici depuis la dernière synchro
+  for (const l of local.values()) {
+    const r = rmap.get(l.id);
+    if (l.synced === l.updated && r) continue;
+    if (r && r.updated >= l.updated) continue;
+    if (l.deleted && !r) { await delNote(l.id); continue; }
+    if (!l.deleted) for (const id of recIdsOf(l.html)) {
+      const a = await getAudio(id);
+      if (!a || a.up) continue;
+      const { error: e } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
+      if (e) throw e;
+      await putAudio({ ...a, up: true });
+    }
+    const row = { id: l.id, user_id: user.id, title: l.title || '', html: l.html || '', text: l.text || '', recs: l.recs || 0, updated: l.updated, deleted: !!l.deleted };
+    const { error: e } = await sb.from('notes').upsert(row);
+    if (e) throw e;
+    const fresh = (await allNotes()).find(x => x.id === l.id);
+    if (fresh && fresh.updated === l.updated) await putNote({ ...fresh, synced: l.updated });
+    if (cur && cur.id === l.id && cur.updated === l.updated) cur.synced = l.updated;
+  }
+  if (changed && !$('#list').classList.contains('hidden')) renderList();
+}
+// Fenêtre « Synchronisation » : connexion / déconnexion
+function cloudSheet() {
+  const s = document.createElement('div'); s.className = 'sheet';
+  if (!sb) {
+    s.innerHTML = '<div><p>Synchronisation</p><small>' + (SB_URL ? 'Service de synchronisation injoignable. Vérifie ta connexion Internet.' : 'La synchronisation n\'est pas encore configurée.') + '</small><button class="cancel">Fermer</button></div>';
+  } else if (user) {
+    s.innerHTML = '<div><p>Synchronisation</p><small class="who"></small><small class="st"></small><button class="ok now">Synchroniser maintenant</button><button class="alt out">Se déconnecter</button><button class="cancel">Fermer</button></div>';
+    s.querySelector('.who').textContent = 'Connecté : ' + user.email;
+    s.querySelector('.st').textContent = syncErr ? 'Erreur : ' + syncErr : lastSync ? 'Dernière synchro : ' + new Date(lastSync).toLocaleString('fr-FR') : '';
+  } else {
+    s.innerHTML = '<div><p>Synchroniser mes notes</p><small>Connecte-toi avec le même compte sur chaque appareil (téléphone, tablette…).</small><input class="em" type="email" placeholder="E-mail" autocomplete="email"><input class="pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"><button class="ok in">Se connecter</button><button class="alt up">Créer un compte</button><button class="cancel">Annuler</button></div>';
+  }
+  s.addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (e.target === s || (b && b.classList.contains('cancel'))) { s.remove(); return; }
+    if (!b) return;
+    if (b.classList.contains('now')) { s.remove(); await sync(); toast(syncErr ? 'Erreur de synchro : ' + syncErr : 'Notes synchronisées'); return; }
+    if (b.classList.contains('out')) { await sb.auth.signOut(); s.remove(); toast('Déconnecté. Les notes restent sur cet appareil.'); return; }
+    const email = s.querySelector('.em').value.trim(), password = s.querySelector('.pw').value;
+    if (!email || password.length < 6) { toast('E-mail et mot de passe (6 caractères min.) requis'); return; }
+    b.disabled = true;
+    const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
+    b.disabled = false;
+    if (error) { toast(/Invalid login/i.test(error.message) ? 'E-mail ou mot de passe incorrect' : /registered/i.test(error.message) ? 'Ce compte existe déjà : touche « Se connecter »' : 'Erreur : ' + error.message); return; }
+    if (!data.session) { toast('Compte créé. Confirme ton e-mail (lien reçu), puis reviens te connecter.'); return; }
+    s.remove(); toast('Connecté, synchronisation…');
+  });
+  document.body.append(s);
+}
+$('#cloud').onclick = cloudSheet;
+if (sb) {
+  sb.auth.onAuthStateChange((ev, session) => {
+    const was = user && user.id; user = session ? session.user : null;
+    if (user && user.id !== was) sync(); else syncUI();
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSoon(100); });
+  addEventListener('online', () => syncSoon(100)); addEventListener('offline', syncUI);
+  setInterval(() => { if (!document.hidden) sync(); }, 30000);
+}
+syncUI();
 
 renderList();
 })();
