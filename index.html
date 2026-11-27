@@ -45,6 +45,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 #body{outline:0;min-height:50vh;word-wrap:break-word;-webkit-user-select:text;user-select:text}
 #body:empty::before{content:"Commencez à écrire…";color:var(--mute)}
 #body ul{padding-left:22px;margin:4px 0}
+#body .st{color:var(--mute);font-size:15px;font-style:italic;padding-left:10px;border-left:3px solid var(--acc);margin:2px 0}
 .cb{display:inline-block;vertical-align:-3px;width:20px;height:20px;margin-right:8px;border:2px solid var(--mute);border-radius:6px;cursor:pointer;position:relative}
 .cb.on{background:var(--acc);border-color:var(--acc)}
 .cb.on::after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -110,6 +111,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
     <button class="ib" data-cmd="underline"><u>U</u></button>
     <button class="ib" data-cmd="list" aria-label="Liste"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg></button>
     <button class="ib" data-cmd="check" aria-label="Case à cocher"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></button>
+    <button class="ib" data-cmd="struct" aria-label="Structure"><svg viewBox="0 0 24 24"><path d="M5 4v16M9 7h10M9 12h7M9 17h10"/></svg></button>
     <button class="ib mic" id="mic" aria-label="Enregistrer"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
   </div>
 </section>
@@ -214,7 +216,15 @@ async function save() {
   $('#date').textContent = dfmt(cur.updated);
 }
 $('#title').addEventListener('input', sched);
-body.addEventListener('input', sched);
+body.addEventListener('input', e => {
+  // Entrée à la fin d'une ligne de structure : la nouvelle ligne redevient normale
+  if (e.inputType === 'insertParagraph') {
+    const s = getSelection(), n = s.rangeCount && s.getRangeAt(0).startContainer;
+    const b = n && (n.nodeType === 1 ? n : n.parentNode).closest('.st');
+    if (b && body.contains(b) && !b.textContent.trim()) { b.classList.remove('st'); if (!b.classList.length) b.removeAttribute('class'); }
+  }
+  sched();
+});
 $('#title').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); body.focus(); } });
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
 
@@ -257,7 +267,9 @@ $('.tools').addEventListener('pointerdown', e => { if (e.target.closest('button'
 $('.tools').addEventListener('click', e => {
   const b = e.target.closest('[data-cmd]'); if (!b) return;
   const c = b.dataset.cmd;
-  if (c === 'check') {
+  if (c === 'struct') {
+    toggleStructure(placeRange());
+  } else if (c === 'check') {
     const r = placeRange(); r.deleteContents();
     const d = document.createElement('div');
     d.innerHTML = '<i class="cb" contenteditable="false"></i> ';
@@ -306,7 +318,7 @@ const clean = s => s.replace(/\s+/g, ' ').trim();
 function textOf(n) { const c = n.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('.rec').forEach(r => r.remove()); return clean(c.textContent); }
 // Toutes les lignes écrites dans la note (sans doublons)
 function noteLines() {
-  const b = body.cloneNode(true); b.querySelectorAll('.rec').forEach(r => r.remove());
+  const b = body.cloneNode(true); b.querySelectorAll('.rec,.st').forEach(r => r.remove());
   b.querySelectorAll('div,p,li,br').forEach(e => e.before('\n'));
   return [...new Set(b.textContent.split('\n').map(clean).filter(Boolean))];
 }
@@ -318,16 +330,52 @@ function lineAt(r) {
   const el = n.nodeType === 1 ? n : n.parentNode;
   if (el.closest('.rec')) return null;
   const li = el.closest('li');
-  if (li && body.contains(li)) return { text: textOf(li), anchor: li, inside: true };
+  if (li && body.contains(li)) return { text: textOf(li), anchor: li, inside: true, blk: li };
   let top = n; while (top.parentNode !== body) top = top.parentNode;
   if (isRec(top) || (top.nodeType === 1 && top.tagName === 'BR')) return null;
-  if (isBlock(top)) return { text: textOf(top), anchor: top };
+  if (isBlock(top)) return { text: textOf(top), anchor: top, blk: top };
   let s = top, e = top, t = '';
   while (s.previousSibling && !isBlock(s.previousSibling)) s = s.previousSibling;
   while (e.nextSibling && !isBlock(e.nextSibling)) e = e.nextSibling;
   for (let x = s; ; x = x.nextSibling) { t += x.textContent; if (x === e) break; }
+  const runEnd = e;
   if (e.nextSibling && e.nextSibling.nodeName === 'BR') e = e.nextSibling;
-  return { text: clean(t), anchor: e };
+  return { text: clean(t), anchor: e, s, e: runEnd };
+}
+const isSt = n => n && n.nodeType === 1 && n.classList.contains('st');
+// Titre du chant au-dessus d'une ligne de structure
+function songAbove(blk) {
+  let x = blk.previousSibling;
+  while (x) {
+    if (isRec(x) || isSt(x) || x.nodeName === 'BR') { x = x.previousSibling; continue; }
+    if (isBlock(x)) { const t = textOf(x); if (t) return t; x = x.previousSibling; continue; }
+    let t = ''; while (x && !isBlock(x)) { t = x.textContent + t; x = x.previousSibling; }
+    if (clean(t)) return clean(t);
+  }
+  return '';
+}
+// Titre proposé pour un enregistrement lancé sur cette ligne
+function lineTitle(line) {
+  if (!line) return '';
+  return isSt(line.blk) ? songAbove(line.blk) : line.text;
+}
+// Marque / démarque la ligne du curseur comme « structure »
+function toggleStructure(r) {
+  const line = lineAt(r);
+  if (!line) { toast('Place le curseur sur une ligne'); return; }
+  let blk = line.blk;
+  if (!blk) { // ligne de texte « nue » : on l'emballe dans un bloc
+    blk = document.createElement('div');
+    line.s.before(blk);
+    let x = line.s; for (;;) { const nx = x.nextSibling, last = x === line.e; blk.append(x); if (last) break; x = nx; }
+    if (blk.nextSibling && blk.nextSibling.nodeName === 'BR') blk.nextSibling.remove();
+    const sr = document.createRange(); sr.selectNodeContents(blk); sr.collapse(false);
+    getSelection().removeAllRanges(); getSelection().addRange(sr); range = sr.cloneRange();
+  }
+  blk.classList.toggle('st');
+  if (!blk.classList.length) blk.removeAttribute('class');
+  toast(isSt(blk) ? 'Ligne marquée comme structure' : 'Ligne redevenue normale');
+  sched();
 }
 // Place l'enregistrement juste sous sa ligne (après les autres enregistrements de cette ligne)
 function insertRec(c, line) {
@@ -407,8 +455,9 @@ $('#mic').addEventListener('click', async () => {
   const chunks = [];
   mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   // Le titre est la ligne où se trouve le curseur au moment de lancer l'enregistrement
+  // (sur une ligne de structure : titre du chant au-dessus)
   const line = lineAt(range);
-  const title = (line && line.text) || 'Enregistrement ' + (body.querySelectorAll('.rec').length + 1);
+  const title = lineTitle(line) || 'Enregistrement ' + (body.querySelectorAll('.rec').length + 1);
   rec = { mr, stream, chunks, start: Date.now(), acc: 0, iv: setInterval(tick, 250), line: line && line.text ? line : null, title };
   mr.start(1000);
   $('#pause').textContent = 'Pause';
