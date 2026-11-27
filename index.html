@@ -21,6 +21,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .top{padding:28px 20px 8px}
 .top h1{margin:0;font-size:34px;line-height:1.1}
 .top p{margin:4px 0 0;color:var(--mute);font-size:15px}
+.top .ver{font-size:12px;opacity:.7}
 .search{margin:12px 20px 8px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:0 12px;height:44px}
 .search input{flex:1;border:0;background:none;font:inherit;font-size:16px;color:var(--ink);outline:0;min-width:0}
 .search svg{color:var(--mute);width:18px;height:18px}
@@ -89,7 +90,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 </head>
 <body>
 <section id="list" class="view">
-  <div class="top"><h1>Notes</h1><p id="count"></p></div>
+  <div class="top"><h1>Notes</h1><p><span id="count"></span> <span class="ver">· v6</span></p></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
   <button class="fab" id="new" aria-label="Nouvelle note"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
