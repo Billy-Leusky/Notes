@@ -52,17 +52,22 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .rec{display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:14px;-webkit-user-select:none;user-select:none;text-decoration:none}
 .rec .pl{flex:none;width:40px;height:40px;border-radius:50%;background:var(--acc);color:#fff;display:grid;place-items:center}
 .rec .pl svg{width:18px;height:18px;fill:currentColor;stroke:none}
+.rec .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.rec .nm{font-size:15px;font-weight:600;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);max-width:100%}
+.rec .row{display:flex;align-items:center;gap:8px}
 .rec .tr{flex:1;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
 .rec .tr i{display:block;height:100%;width:0;background:var(--acc)}
 .rec .t{font-size:14px;color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap}
-.rec .x{width:32px;height:32px;display:grid;place-items:center;color:var(--mute)}
+.rec .x,.rec .sh{flex:none;width:32px;height:32px;display:grid;place-items:center;color:var(--mute)}
 .rec .x svg{width:16px;height:16px}
+.rec .sh{color:var(--acc)}
+.rec .sh svg{width:20px;height:20px}
 .tools{display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--line);background:var(--card);padding:4px 8px calc(4px + env(safe-area-inset-bottom))}
 .tools .mic{color:#fff;background:var(--rec);border-radius:50%;width:48px;height:48px}
 .recbar{position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);border-radius:18px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
 .dot{width:12px;height:12px;border-radius:50%;background:var(--rec);animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.3}}
-.recbar .tm{flex:1;font-variant-numeric:tabular-nums;font-size:18px}
+.recbar .tm{flex:1;min-width:0;font-variant-numeric:tabular-nums;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .recbar button{background:var(--rec);color:#fff;border-radius:12px;padding:0 16px;height:44px;font-weight:600}
 .recbar .pause{background:transparent;border:1px solid currentColor;color:inherit}
 .toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:15px;max-width:90vw;z-index:9;text-align:center}
@@ -72,6 +77,11 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .sheet button{display:block;width:100%;height:50px;border-radius:14px;margin-top:8px;font-weight:600}
 .sheet .danger{background:var(--rec);color:#fff}
 .sheet .cancel{background:var(--bg)}
+.sheet .ok{background:var(--acc);color:#fff}
+.sheet input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;font-size:16px;background:var(--bg);color:var(--ink);outline:0}
+.sheet small{display:block;margin:14px 0 2px;color:var(--mute);font-size:13px}
+.sheet .lines{max-height:38vh;overflow-y:auto}
+.sheet .lines button{height:auto;min-height:44px;padding:8px 12px;margin-top:6px;text-align:left;font-weight:400;background:var(--bg);border:1px solid var(--line)}
 @media(prefers-reduced-motion:reduce){.dot{animation:none}}
 </style>
 </head>
@@ -114,6 +124,7 @@ const I = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  share: '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
   mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'
 };
 
@@ -149,7 +160,7 @@ const fmt = s => { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + Str
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dfmt = t => new Date(t).toLocaleString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-let notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {};
+let notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {}, blobs = {};
 
 // ---------- Liste ----------
 async function renderList() {
@@ -173,15 +184,17 @@ async function openNote(n) {
   $('#list').classList.add('hidden'); $('#editor').classList.remove('hidden');
   $('.scroller').scrollTop = 0;
   if (!n.title && !n.html) setTimeout(() => $('#title').focus(), 50);
-  for (const c of body.querySelectorAll('.rec')) {
-    resetChip(c);
+  for (const old of body.querySelectorAll('.rec')) {
+    // Reconstruit le lecteur (met aussi à jour les anciens enregistrements sans titre)
+    const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title);
+    old.replaceWith(c);
     const a = await getAudio(c.dataset.id);
-    if (a) urls[c.dataset.id] = URL.createObjectURL(a.blob);
+    if (a) { blobs[c.dataset.id] = a.blob; urls[c.dataset.id] = URL.createObjectURL(a.blob); }
   }
 }
 function showList() {
   stopPlay();
-  Object.values(urls).forEach(u => URL.revokeObjectURL(u)); urls = {};
+  Object.values(urls).forEach(u => URL.revokeObjectURL(u)); urls = {}; blobs = {};
   $('#editor').classList.add('hidden'); $('#list').classList.remove('hidden');
   renderList();
 }
@@ -262,7 +275,9 @@ body.addEventListener('click', e => {
   if (cb) { cb.classList.toggle('on'); sched(); return; }
   const c = e.target.closest('.rec'); if (!c) return;
   e.preventDefault();
-  if (e.target.closest('.x')) {
+  if (e.target.closest('.nm')) renameRec(c);
+  else if (e.target.closest('.sh')) shareRec(c);
+  else if (e.target.closest('.x')) {
     ask('Supprimer cet enregistrement ?', async () => {
       if (playing && playing.chip === c) stopPlay();
       c.remove(); await delAudio(c.dataset.id); sched(); save();
@@ -271,11 +286,92 @@ body.addEventListener('click', e => {
 });
 
 // ---------- Audio ----------
-function chip(id, d) {
+function chip(id, d, title) {
   const c = document.createElement('div');
   c.className = 'rec'; c.contentEditable = 'false'; c.dataset.id = id; c.dataset.d = d.toFixed(1);
-  c.innerHTML = `<button class="pl" type="button" aria-label="Lire">${I.play}</button><span class="tr"><i></i></span><span class="t">${fmt(d)}</span><button class="x" type="button" aria-label="Supprimer">${I.x}</button>`;
+  c.innerHTML = `<button class="pl" type="button" aria-label="Lire">${I.play}</button><span class="mid"><button class="nm" type="button" aria-label="Renommer"></button><span class="row"><span class="tr"><i></i></span><span class="t">${fmt(d)}</span></span></span><button class="sh" type="button" aria-label="Partager">${I.share}</button><button class="x" type="button" aria-label="Supprimer">${I.x}</button>`;
+  setTitle(c, title);
   return c;
+}
+function setTitle(c, t) {
+  t = (t || '').replace(/\s+/g, ' ').trim();
+  if (t) c.dataset.title = t; else delete c.dataset.title;
+  c.querySelector('.nm').textContent = t || 'Sans titre';
+}
+
+// ---------- Titres des enregistrements ----------
+const isBlock = n => n.nodeType === 1 && /^(DIV|P|LI|UL|OL|BR|H[1-6]|BLOCKQUOTE)$/.test(n.tagName);
+const isRec = n => n && n.nodeType === 1 && n.classList.contains('rec');
+const clean = s => s.replace(/\s+/g, ' ').trim();
+function textOf(n) { const c = n.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('.rec').forEach(r => r.remove()); return clean(c.textContent); }
+// Toutes les lignes écrites dans la note (sans doublons)
+function noteLines() {
+  const b = body.cloneNode(true); b.querySelectorAll('.rec').forEach(r => r.remove());
+  b.querySelectorAll('div,p,li,br').forEach(e => e.before('\n'));
+  return [...new Set(b.textContent.split('\n').map(clean).filter(Boolean))];
+}
+// Ligne où se trouve le curseur : son texte + où placer l'enregistrement
+function lineAt(r) {
+  if (!r || !body.contains(r.startContainer)) return null;
+  let n = r.startContainer;
+  if (n === body) { n = body.childNodes[r.startOffset] || body.childNodes[r.startOffset - 1]; if (!n) return null; }
+  const el = n.nodeType === 1 ? n : n.parentNode;
+  if (el.closest('.rec')) return null;
+  const li = el.closest('li');
+  if (li && body.contains(li)) return { text: textOf(li), anchor: li, inside: true };
+  let top = n; while (top.parentNode !== body) top = top.parentNode;
+  if (isRec(top) || (top.nodeType === 1 && top.tagName === 'BR')) return null;
+  if (isBlock(top)) return { text: textOf(top), anchor: top };
+  let s = top, e = top, t = '';
+  while (s.previousSibling && !isBlock(s.previousSibling)) s = s.previousSibling;
+  while (e.nextSibling && !isBlock(e.nextSibling)) e = e.nextSibling;
+  for (let x = s; ; x = x.nextSibling) { t += x.textContent; if (x === e) break; }
+  if (e.nextSibling && e.nextSibling.nodeName === 'BR') e = e.nextSibling;
+  return { text: clean(t), anchor: e };
+}
+// Place l'enregistrement juste sous sa ligne (après les autres enregistrements de cette ligne)
+function insertRec(c, line) {
+  if (!line || !line.anchor.isConnected) return insertBlock(c);
+  if (line.inside) line.anchor.append(c);
+  else { let a = line.anchor; while (isRec(a.nextSibling)) a = a.nextSibling; a.after(c); }
+  if (c.parentNode === body && !c.nextSibling) { const d = document.createElement('div'); d.innerHTML = '<br>'; c.after(d); }
+  body.focus();
+  caretAt(c.parentNode, [...c.parentNode.childNodes].indexOf(c) + 1);
+  sched();
+}
+function renameRec(c) {
+  const s = document.createElement('div'); s.className = 'sheet';
+  s.innerHTML = '<div><p>Titre de l\'enregistrement</p><input class="ti" placeholder="Titre" enterkeyhint="done"><small></small><div class="lines"></div><button class="ok">Enregistrer</button><button class="cancel">Annuler</button></div>';
+  const inp = s.querySelector('.ti'); inp.value = c.dataset.title || '';
+  const lines = noteLines();
+  s.querySelector('small').textContent = lines.length ? 'Ou choisir une ligne de la note :' : '';
+  const box = s.querySelector('.lines');
+  for (const l of lines) { const b = document.createElement('button'); b.className = 'line'; b.textContent = l; box.append(b); }
+  const done = t => { setTitle(c, t); sched(); save(); s.remove(); };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } });
+  s.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (e.target === s || (b && b.classList.contains('cancel'))) s.remove();
+    else if (b && b.classList.contains('line')) done(b.textContent);
+    else if (b && b.classList.contains('ok')) done(inp.value);
+  });
+  document.body.append(s);
+}
+// ---------- Partage (le fichier porte le titre de l'enregistrement) ----------
+function shareRec(c) {
+  const blob = blobs[c.dataset.id];
+  if (!blob) { toast('Audio introuvable'); return; }
+  const t = c.dataset.title || 'Enregistrement';
+  const name = (t.replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement')
+    + '.' + (/webm/.test(blob.type) ? 'webm' : /ogg/.test(blob.type) ? 'ogg' : 'm4a');
+  const f = new File([blob], name, { type: blob.type || 'audio/mp4' });
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    navigator.share({ files: [f], title: t }).catch(e => { if (e.name !== 'AbortError') toast('Partage impossible'); });
+  } else {
+    const a = document.createElement('a'), u = URL.createObjectURL(f);
+    a.href = u; a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 10000);
+  }
 }
 function resetChip(c) {
   c.querySelector('.pl').innerHTML = I.play;
@@ -298,7 +394,7 @@ function togglePlay(c) {
 }
 
 const elapsed = () => rec.acc + (rec.mr.state === 'recording' ? Date.now() - rec.start : 0);
-const tick = () => { if (rec) $('#tm').textContent = fmt(elapsed() / 1000); };
+const tick = () => { if (rec) $('#tm').textContent = fmt(elapsed() / 1000) + (rec.title ? ' · ' + rec.title : ''); };
 $('#mic').addEventListener('click', async () => {
   if (rec) return stopRec();
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast("Enregistrement non disponible ici. Ouvre l'app dans Safari, via une adresse https."); return; }
@@ -310,7 +406,10 @@ $('#mic').addEventListener('click', async () => {
   const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
   const chunks = [];
   mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  rec = { mr, stream, chunks, start: Date.now(), acc: 0, iv: setInterval(tick, 250) };
+  // Le titre est la ligne où se trouve le curseur au moment de lancer l'enregistrement
+  const line = lineAt(range);
+  const title = (line && line.text) || 'Enregistrement ' + (body.querySelectorAll('.rec').length + 1);
+  rec = { mr, stream, chunks, start: Date.now(), acc: 0, iv: setInterval(tick, 250), line: line && line.text ? line : null, title };
   mr.start(1000);
   $('#pause').textContent = 'Pause';
   $('#recbar').classList.remove('hidden'); tick();
@@ -332,8 +431,8 @@ function stopRec() {
       const blob = new Blob(r.chunks, { type: r.mr.mimeType || 'audio/mp4' });
       const id = uid();
       await putAudio({ id, blob, d: dur });
-      urls[id] = URL.createObjectURL(blob);
-      insertBlock(chip(id, dur));
+      blobs[id] = blob; urls[id] = URL.createObjectURL(blob);
+      insertRec(chip(id, dur, r.title), r.line);
       await save(); res();
     };
     r.mr.stop();
