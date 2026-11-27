@@ -39,7 +39,7 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
 .ib:active{background:var(--line)}
 .ib.on{background:var(--acc);color:#fff}
 .back{display:flex;align-items:center;gap:2px;color:var(--acc);padding:0 8px;height:44px}
-.scroller{flex:1;overflow-y:auto;padding:0 20px 120px}
+.scroller{flex:1;overflow-y:auto;padding:0 max(20px,calc((100% - 760px) / 2)) 120px}
 #title{width:100%;border:0;background:none;font:inherit;font-size:26px;font-weight:700;color:var(--ink);outline:0;padding:6px 0}
 #title::placeholder{color:var(--mute)}
 #date{font-size:13px;color:var(--mute);margin-bottom:10px}
@@ -422,13 +422,20 @@ async function memBlob(id, blob) {
   blobs[id] = blob;
   try { const buf = await blob.arrayBuffer(); if (blobs[id] === blob) blobs[id] = new Blob([buf], { type: baseType(blob.type) }); } catch (e) {}
 }
-function recFile(c) {
-  const blob = blobs[c.dataset.id]; if (!blob) return null;
+// Fichiers candidats : chaque plateforme n'accepte que certains couples type/extension
+// (Chrome Android refuse « audio/mp4 » mais accepte « audio/x-m4a » ; Safari accepte « audio/mp4 »)
+function recFiles(c) {
+  const blob = blobs[c.dataset.id]; if (!blob) return [];
   const type = baseType(blob.type);
-  const t = c.dataset.title || 'Enregistrement';
-  const name = (t.replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement')
-    + '.' + (/webm/.test(type) ? 'webm' : /ogg/.test(type) ? 'ogg' : 'm4a');
-  return new File([blob], name, { type });
+  const base = ((c.dataset.title || 'Enregistrement').replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement');
+  const opts = /webm/.test(type) ? [['audio/webm', 'webm'], ['audio/webm', 'weba'], ['video/webm', 'webm']]
+    : /ogg/.test(type) ? [['audio/ogg', 'ogg']]
+    : [['audio/mp4', 'm4a'], ['audio/x-m4a', 'm4a'], ['video/mp4', 'mp4']];
+  return opts.map(([t, ext]) => new File([blob], base + '.' + ext, { type: t }));
+}
+function recFile(c) {
+  const fs = recFiles(c); if (!fs.length) return null;
+  return (navigator.canShare && fs.find(f => navigator.canShare({ files: [f] }))) || fs[0];
 }
 function download(f) {
   const a = document.createElement('a'), u = URL.createObjectURL(f);
@@ -439,7 +446,9 @@ function shareRec(c) {
   const f = recFile(c);
   if (!f) { toast('Audio introuvable'); return; }
   if (!f.size) { toast('Cet enregistrement est vide'); return; }
-  if (!(navigator.canShare && navigator.canShare({ files: [f] }))) { download(f); return; }
+  if (!(navigator.share && navigator.canShare && navigator.canShare({ files: [f] }))) {
+    shareFallback(c, { name: 'Partage de fichiers non disponible sur ce navigateur' }); return;
+  }
   // Uniquement le fichier (pas de titre/texte) : c'est ce que Safari accepte le mieux
   navigator.share({ files: [f] }).catch(e => { if (e.name !== 'AbortError') shareFallback(c, e); });
 }
