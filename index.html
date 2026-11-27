@@ -192,7 +192,7 @@ async function openNote(n) {
     const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title);
     old.replaceWith(c);
     const a = await getAudio(c.dataset.id);
-    if (a) { blobs[c.dataset.id] = a.blob; urls[c.dataset.id] = URL.createObjectURL(a.blob); }
+    if (a) { urls[c.dataset.id] = URL.createObjectURL(a.blob); memBlob(c.dataset.id, a.blob); }
   }
 }
 function showList() {
@@ -416,20 +416,49 @@ function renameRec(c) {
   document.body.append(s);
 }
 // ---------- Partage (le fichier porte le titre de l'enregistrement) ----------
-function shareRec(c) {
-  const blob = blobs[c.dataset.id];
-  if (!blob) { toast('Audio introuvable'); return; }
+// Copie en mémoire de l'audio : Safari refuse parfois de partager un fichier lu depuis IndexedDB
+const baseType = t => (t || 'audio/mp4').split(';')[0].trim();
+async function memBlob(id, blob) {
+  blobs[id] = blob;
+  try { const buf = await blob.arrayBuffer(); if (blobs[id] === blob) blobs[id] = new Blob([buf], { type: baseType(blob.type) }); } catch (e) {}
+}
+function recFile(c) {
+  const blob = blobs[c.dataset.id]; if (!blob) return null;
+  const type = baseType(blob.type);
   const t = c.dataset.title || 'Enregistrement';
   const name = (t.replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement')
-    + '.' + (/webm/.test(blob.type) ? 'webm' : /ogg/.test(blob.type) ? 'ogg' : 'm4a');
-  const f = new File([blob], name, { type: blob.type || 'audio/mp4' });
-  if (navigator.canShare && navigator.canShare({ files: [f] })) {
-    navigator.share({ files: [f], title: t }).catch(e => { if (e.name !== 'AbortError') toast('Partage impossible'); });
-  } else {
-    const a = document.createElement('a'), u = URL.createObjectURL(f);
-    a.href = u; a.download = name; document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 10000);
-  }
+    + '.' + (/webm/.test(type) ? 'webm' : /ogg/.test(type) ? 'ogg' : 'm4a');
+  return new File([blob], name, { type });
+}
+function download(f) {
+  const a = document.createElement('a'), u = URL.createObjectURL(f);
+  a.href = u; a.download = f.name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+function shareRec(c) {
+  const f = recFile(c);
+  if (!f) { toast('Audio introuvable'); return; }
+  if (!f.size) { toast('Cet enregistrement est vide'); return; }
+  if (!(navigator.canShare && navigator.canShare({ files: [f] }))) { download(f); return; }
+  // Uniquement le fichier (pas de titre/texte) : c'est ce que Safari accepte le mieux
+  navigator.share({ files: [f] }).catch(e => { if (e.name !== 'AbortError') shareFallback(c, e); });
+}
+// Si le partage échoue : nouvelle tentative (nouveau toucher) ou téléchargement
+function shareFallback(c, err) {
+  const s = document.createElement('div'); s.className = 'sheet';
+  s.innerHTML = '<div><p>Le partage n\'a pas marché</p><small></small><button class="ok">Réessayer le partage</button><button class="dl">Enregistrer le fichier</button><button class="cancel">Annuler</button></div>';
+  s.querySelector('small').textContent = 'Erreur : ' + (err && (err.name + (err.message ? ' – ' + err.message : '')) || 'inconnue');
+  s.querySelector('.dl').style.background = 'var(--bg)';
+  s.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (e.target === s || (b && b.classList.contains('cancel'))) { s.remove(); return; }
+    if (!b) return;
+    s.remove();
+    const f = recFile(c); if (!f) return;
+    if (b.classList.contains('dl')) download(f);
+    else navigator.share({ files: [f] }).catch(e2 => { if (e2.name !== 'AbortError') toast('Partage impossible : ' + e2.name + '. Utilise « Enregistrer le fichier ».'); });
+  });
+  document.body.append(s);
 }
 function resetChip(c) {
   c.querySelector('.pl').innerHTML = I.play;
@@ -490,7 +519,7 @@ function stopRec() {
       const blob = new Blob(r.chunks, { type: r.mr.mimeType || 'audio/mp4' });
       const id = uid();
       await putAudio({ id, blob, d: dur });
-      blobs[id] = blob; urls[id] = URL.createObjectURL(blob);
+      urls[id] = URL.createObjectURL(blob); memBlob(id, blob);
       insertRec(chip(id, dur, r.title), r.line);
       await save(); res();
     };
