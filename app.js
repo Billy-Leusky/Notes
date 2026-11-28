@@ -1751,13 +1751,13 @@ function setText(set, wa = true) {
     L.push(B((i + 1) + '. ' + itemTitle(it)));
     const keyTxt = k ? keyLabel(k) + (it.key && song && song.key && it.key !== song.key ? ' ' + It('(orig. ' + keyLabel(song.key) + ')') : '') : '';
     const meta = [keyTxt, song && song.bpm && song.bpm + ' BPM', song && song.sig, song && song.style].filter(Boolean).join(' · ');
-    if (meta) L.push('🎹 ' + meta);
-    if (st.length) L.push('🧩 ' + st.map(x => secLabel(x) + (x.x > 1 ? ' ×' + x.x : '') + (x.i ? ' ' + It('(' + x.i + ')') : '')).join(' → '));
-    if (it.lead) L.push('🎤 ' + it.lead);
-    if (it.note) L.push('💬 ' + It(it.note));
+    if (meta) L.push('♪ ' + meta);
+    if (st.length) L.push('▸ ' + st.map(x => secLabel(x) + (x.x > 1 ? ' ×' + x.x : '') + (x.i ? ' ' + It('(' + x.i + ')') : '')).join(' → '));
+    if (it.lead) L.push('• Lead : ' + it.lead);
+    if (it.note) L.push('↳ ' + It(it.note));
   });
   if (!its.length) L.push(It('Aucun chant pour l\'instant.'));
-  if (clean(set.notes || '')) L.push('', sep, '📝 ' + B('Notes'), set.notes.trim());
+  if (clean(set.notes || '')) L.push('', sep, '✎ ' + B('Notes'), set.notes.trim());
   return L.join('\n');
 }
 function printSet(set) {
