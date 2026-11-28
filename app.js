@@ -1,7 +1,8 @@
 (async () => {
 // ---------- Configuration de la synchronisation (projet Supabase) ----------
-const SB_URL = '';
-const SB_KEY = '';
+const SB_URL = 'https://hblqrpppbtljrncpjrsy.supabase.co';
+// Clé publique « anon » : faite pour être visible ; les règles d'accès (RLS) protègent les données
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhibHFycHBwYnRsanJuY3BqcnN5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU4MzA4OTMsImV4cCI6MjExMTQwNjg5M30.tZCrrkVBTFD_PrOkWvqQMxjDh91H7N0mzAHhI6lIiMs';
 const $ = s => document.querySelector(s);
 const body = $('#body');
 const I = {
@@ -540,7 +541,7 @@ function cloudSheet() {
     const email = s.querySelector('.em').value.trim(), password = s.querySelector('.pw').value;
     if (!email || password.length < 6) { toast('E-mail et mot de passe (6 caractères min.) requis'); return; }
     b.disabled = true;
-    const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
+    const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }) : await sb.auth.signInWithPassword({ email, password });
     b.disabled = false;
     if (error) { toast(/Invalid login/i.test(error.message) ? 'E-mail ou mot de passe incorrect' : /registered/i.test(error.message) ? 'Ce compte existe déjà : touche « Se connecter »' : 'Erreur : ' + error.message); return; }
     if (!data.session) { toast('Compte créé. Confirme ton e-mail (lien reçu), puis reviens te connecter.'); return; }

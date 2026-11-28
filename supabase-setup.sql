@@ -14,15 +14,16 @@ create table if not exists public.docs (
   updated bigint not null,
   deleted boolean not null default false
 );
+create index if not exists docs_user_id_idx on public.docs (user_id);
 alter table public.docs enable row level security;
 drop policy if exists "docs perso" on public.docs;
 create policy "docs perso" on public.docs for all to authenticated
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 -- Espace de stockage privé pour les enregistrements audio (un dossier par utilisateur)
 insert into storage.buckets (id, name, public) values ('audio', 'audio', false)
   on conflict (id) do nothing;
 drop policy if exists "audio perso" on storage.objects;
 create policy "audio perso" on storage.objects for all to authenticated
-  using (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text)
-  with check (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+  using (bucket_id = 'audio' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'audio' and (storage.foldername(name))[1] = (select auth.uid())::text);
