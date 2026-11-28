@@ -291,3 +291,8 @@ textarea.fld{resize:vertical;line-height:1.4}
 .ytrow a,.ytrow button{width:auto!important;height:32px!important;margin:0!important;padding:0 10px;font-size:13px!important;font-weight:500!important;border-radius:10px;display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--line);color:var(--acc);text-decoration:none}
 .ytrow input{flex-basis:100%;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;background:var(--card);color:var(--ink)}
 .setact{flex-wrap:wrap}
+.ytrow.play{cursor:pointer;border:2px solid transparent}
+.ytrow.play:active{background:var(--line)}
+.ytrow.cur{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--bg))}
+.ytrow.cur .ok-y{color:var(--acc);font-weight:600}
+.ytrow .ok-y{color:var(--acc)}

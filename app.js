@@ -1934,15 +1934,17 @@ const setYtIds = set => itemsOf(set.id).map(it => songYt(songs.get(it.songId))).
 const ytWatch = ids => 'https://www.youtube.com/watch_videos?video_ids=' + ids.join(',');
 function ytSheet(set) {
   const sh = sheet('<p>Playlist YouTube</p><div class="ytframe"></div><small class="ys"></small><div class="ytlist"></div><button class="ok open">Ouvrir dans YouTube</button><button class="alt copy">Copier le lien de la playlist</button><button class="cancel">Fermer</button>');
-  let shown = null;
+  let shown = null, start = 0, autoplay = false;
   const draw = () => {
     const rows = itemsOf(set.id).map(it => ({ it, song: songs.get(it.songId) })).map(r => ({ ...r, id: songYt(r.song) }));
     const ids = rows.map(r => r.id).filter(Boolean);
-    const key = ids.join(',');
-    if (key !== shown) { // le lecteur n'est rechargé que si la liste change (la lecture continue sinon)
+    if (start >= ids.length) start = 0;
+    const key = ids.join(',') + '@' + start;
+    if (key !== shown) { // le lecteur n'est rechargé que si la liste ou le chant choisi change
       shown = key;
+      // On démarre au chant choisi, puis la lecture continue avec les chants suivants du set
       sh.querySelector('.ytframe').innerHTML = ids.length
-        ? `<iframe src="https://www.youtube-nocookie.com/embed/${ids[0]}?playlist=${ids.slice(1).join(',')}&rel=0&playsinline=1" title="Playlist YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`
+        ? `<iframe src="https://www.youtube-nocookie.com/embed/${ids[start]}?playlist=${ids.slice(start + 1).join(',')}&rel=0&playsinline=1${autoplay ? '&autoplay=1' : ''}" title="Playlist YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`
         : '';
       sh.querySelector('.ytframe').classList.toggle('hidden', !ids.length);
     }
@@ -1952,16 +1954,24 @@ function ytSheet(set) {
     sh.querySelector('.copy').classList.toggle('hidden', !ids.length);
     html(sh.querySelector('.ytlist'), rows.map((r, i) => {
       const title = itemTitle(r.it), q = encodeURIComponent([title, r.song && r.song.artist].filter(Boolean).join(' '));
-      return `<div class="ytrow" data-song="${esc(r.song ? r.song.id : '')}"><b>${i + 1}. ${esc(title)}</b>`
-        + (r.id ? '<span class="ok-y">✓ vidéo</span>' : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
+      const vi = r.id ? ids.indexOf(r.id, rows.slice(0, i).filter(x => x.id).length) : -1;
+      return `<div class="ytrow${r.id ? ' play' : ''}${vi === start && r.id ? ' cur' : ''}" data-song="${esc(r.song ? r.song.id : '')}"${r.id ? ` data-vi="${vi}" role="button" tabindex="0"` : ''}><b>${i + 1}. ${esc(title)}</b>`
+        + (r.id ? `<span class="ok-y">${vi === start ? '▶ en cours' : '▶ lire'}</span>` : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
         + '</div>';
     }).join(''));
   };
   draw();
   sh.addEventListener('click', async e => {
+    // Toucher un chant de la liste : sa vidéo démarre, puis la suite du set
+    const row = e.target.closest('.ytrow.play');
+    if (row && !e.target.closest('a,button,input')) {
+      start = +row.dataset.vi; autoplay = true; draw();
+      sh.querySelector('.ytframe').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      return;
+    }
     const b = e.target.closest('button'); if (!b) return;
     const ids = setYtIds(set);
-    if (b.classList.contains('open')) window.open(ytWatch(ids), '_blank', 'noopener');
+    if (b.classList.contains('open')) window.open(ytWatch(ids.slice(start)), '_blank', 'noopener');
     else if (b.classList.contains('copy')) { try { await navigator.clipboard.writeText(ytWatch(ids)); toast('Lien de la playlist copié'); } catch (er) { toast(ytWatch(ids)); } }
     else if (b.classList.contains('add')) {
       const row = b.closest('.ytrow'); if (row.querySelector('input')) return;
