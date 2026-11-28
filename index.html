@@ -9,12 +9,12 @@
 <meta name="apple-mobile-web-app-title" content="Sets">
 <meta name="theme-color" content="#f6f5f2">
 <title>Sets & Notes</title>
-<link rel="stylesheet" href="app.css?v=12">
+<link rel="stylesheet" href="app.css?v=13">
 </head>
 <body>
 <!-- ========== Accueil : onglets Sets / Chants / Notes ========== -->
 <section id="list" class="view">
-  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v12</span></p></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
+  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v13</span></p><button id="space" class="space hidden" type="button"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.8 5 5.8"/></svg><span></span><i>▾</i></button></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
   <button class="fab" id="new" aria-label="Nouveau"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -53,11 +53,12 @@
   <div class="bar">
     <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Chants</span></button>
     <span class="sp"></span>
-    <button class="ib" id="s-del" aria-label="Supprimer le chant"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+    <button class="ib edit-only" id="s-del" aria-label="Supprimer le chant"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
   </div>
   <div class="scroller form">
     <input id="s-title" class="big" placeholder="Titre du chant" autocomplete="off">
     <input id="s-artist" class="sub" placeholder="Auteur / artiste" autocomplete="off">
+    <p id="s-mod" class="info mod"></p>
     <div class="fields">
       <label>Tonalité<button id="s-key" class="fld" type="button"></button></label>
       <label>Tempo<input id="s-bpm" class="fld" inputmode="numeric" placeholder="BPM" autocomplete="off"></label>
@@ -75,6 +76,7 @@
     <h3>Enregistrements de référence</h3>
     <div id="s-recs" class="recs"></div>
     <button class="recbtn" id="s-rec" type="button"><span class="rdot"></span>Enregistrer</button>
+    <div id="s-mine" class="mine hidden"><h3>Mes notes perso <small>visibles par moi seul</small></h3><textarea id="s-pnote" class="fld" rows="2" placeholder="Ex. slap sur le pont, capo 2…"></textarea></div>
     <h3>Utilisé dans</h3>
     <div id="s-used" class="used"></div>
   </div>
@@ -85,8 +87,8 @@
   <div class="bar">
     <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Sets</span></button>
     <span class="sp"></span>
-    <button class="ib" id="set-dup" aria-label="Dupliquer le set"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
-    <button class="ib" id="set-del" aria-label="Supprimer le set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+    <button class="ib edit-only" id="set-dup" aria-label="Dupliquer le set"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
+    <button class="ib edit-only" id="set-del" aria-label="Supprimer le set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
   </div>
   <div class="scroller form">
     <input id="set-name" class="big" placeholder="Nom (ex. Culte du dimanche)" autocomplete="off">
@@ -94,8 +96,9 @@
       <label>Date<input id="set-date" class="fld" type="date"></label>
     </div>
     <p id="set-sum" class="info"></p>
+    <p id="set-mod" class="info mod"></p>
     <div id="set-items" class="items"></div>
-    <button class="addbtn" id="set-add" type="button">+ Ajouter un chant</button>
+    <button class="addbtn edit-only" id="set-add" type="button">+ Ajouter un chant</button>
     <h3>Notes du set</h3>
     <textarea id="set-notes" class="fld" rows="3" placeholder="Infos générales, horaires, consignes…"></textarea>
   </div>
@@ -106,22 +109,24 @@
   <div class="bar">
     <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Set</span></button>
     <span class="sp"></span>
-    <button class="ib" id="it-del" aria-label="Retirer du set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+    <button class="ib edit-only" id="it-del" aria-label="Retirer du set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
   </div>
   <div class="scroller form">
     <div class="ithead"><span id="it-num" class="num"></span><div><h2 id="it-title"></h2><button id="it-open" class="link" type="button">Voir la fiche du chant ›</button></div></div>
     <p id="it-info" class="info"></p>
+    <p id="it-mod" class="info mod"></p>
     <div class="fields two">
       <label>Tonalité du jour<button id="it-key" class="fld" type="button"></button></label>
       <label>Lead<input id="it-lead" class="fld" placeholder="Qui chante ?" autocomplete="off"></label>
     </div>
-    <h3>Structure du jour <button id="it-reset" class="link small" type="button">Rétablir celle du chant</button></h3>
+    <h3>Structure du jour <button id="it-reset" class="link small edit-only" type="button">Rétablir celle du chant</button></h3>
     <div id="it-struct"></div>
     <h3>Note / transition</h3>
     <textarea id="it-note" class="fld" rows="2" placeholder="Ex. enchaîner sans pause, piano seul pendant la prière…"></textarea>
     <h3>Enregistrements</h3>
     <div id="it-recs" class="recs"></div>
     <button class="recbtn" id="it-rec" type="button"><span class="rdot"></span>Enregistrer</button>
+    <div id="it-mine" class="mine hidden"><h3>Mes notes perso <small>visibles par moi seul</small></h3><textarea id="it-pnote" class="fld" rows="2" placeholder="Ex. attention au break avant le refrain…"></textarea></div>
   </div>
 </section>
 
@@ -130,6 +135,6 @@
 <div id="recbar" class="recbar hidden"><span class="dot"></span><span class="tm" id="tm">0:00</span><button class="pause" id="pause">Pause</button><button id="stop">Arrêter</button></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

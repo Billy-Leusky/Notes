@@ -178,3 +178,27 @@ textarea.fld{resize:vertical;line-height:1.4}
 .sheet .pick em{font-style:normal;font-size:12px;color:var(--mute)}
 .sheet .seg+p{margin-top:20px}
 .itc .main .pills{margin-top:2px}
+
+/* ---------- Équipes ---------- */
+.space{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:6px 12px;border-radius:18px;background:var(--card);border:1px solid var(--line);font-size:14px;font-weight:600;color:var(--acc);max-width:100%}
+.space svg{width:18px;height:18px;flex:none}
+.space span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.space i{font-style:normal;color:var(--mute);font-size:12px}
+.sheet .pick button{flex-wrap:wrap}
+.sheet .pick button.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--bg))}
+.sheet .pick button em{flex-basis:100%;font-style:normal;font-size:13px;color:var(--mute);font-weight:400}
+.sheet .code{font:700 30px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;text-align:center;padding:8px;margin:4px 0;border:2px dashed var(--line);border-radius:14px;color:var(--acc)}
+.sheet .members{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.sheet .mem{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;background:var(--bg);border-radius:12px}
+.sheet .mem span{flex:1;min-width:140px;display:flex;flex-direction:column}
+.sheet .mem em{font-style:normal;font-size:13px;color:var(--mute)}
+.sheet .mem button{width:auto;height:34px;padding:0 10px;margin:0;font-size:13px;font-weight:500}
+.mod{font-size:13px;margin-top:2px}
+.mod:empty,.info:empty{display:none}
+.mine h3 small{text-transform:none;letter-spacing:0;font-weight:400}
+/* Lecture seule (musicien dans une équipe) */
+.ro .edit-only,.ro .palette,.ro .quick,.ro .mv{display:none!important}
+.ro .fld:disabled{opacity:1;color:var(--ink);-webkit-text-fill-color:var(--ink);background:transparent;border-color:transparent;padding-left:0}
+.ro textarea.fld:disabled{resize:none}
+.rec.ro .x{display:none}
+.ro .fld:disabled::placeholder{color:transparent}

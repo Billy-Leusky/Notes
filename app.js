@@ -26,8 +26,8 @@ function ask(msg, ok) {
 let db;
 try {
   db = await new Promise((res, rej) => {
-    const r = indexedDB.open('notes-app', 2);
-    r.onupgradeneeded = () => { const d = r.result; for (const n of ['notes', 'audio', 'songs', 'sets']) if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' }); };
+    const r = indexedDB.open('notes-app', 3);
+    r.onupgradeneeded = () => { const d = r.result; for (const n of ['notes', 'audio', 'songs', 'sets', 'items', 'recs', 'pnotes']) if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' }); };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
   navigator.storage?.persist?.();
@@ -49,29 +49,29 @@ const fmt = s => { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + Str
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const dfmt = t => new Date(t).toLocaleString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-let nav = [], songs = new Map(), sets = new Map(), editTouched = new Set();
+let nav = [], songs = new Map(), sets = new Map(), items = new Map(), recDocs = new Map(), pnotes = new Map();
 let touched = false, notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {}, blobs = {};
 
 // ---------- Liste ----------
 const renderList = () => renderTab();
 async function renderNotes() {
-  notes = (await allNotes()).filter(n => !n.deleted).sort((a, b) => b.updated - a.updated);
+  notes = (await allNotes()).filter(n => !n.deleted).sort((a, b) => (b.edited || 0) - (a.edited || 0));
   const q = $('#q').value.trim().toLowerCase();
   const list = notes.filter(n => !q || ((n.title || '') + ' ' + (n.text || '')).toLowerCase().includes(q));
   $('#count').textContent = notes.length + (notes.length > 1 ? ' notes' : ' note');
-  $('#grid').innerHTML = list.length ? list.map(n => `<button class="card" data-id="${esc(n.id)}"><b>${esc(n.title || 'Sans titre')}</b><span>${esc(n.text || '')}</span><small>${n.recs ? I.mic + esc(n.recs) + ' · ' : ''}${esc(new Date(n.updated).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }))}</small></button>`).join('')
-    : `<div class="empty">${q ? 'Aucun résultat' : 'Aucune note.<br>Touchez + pour commencer.'}</div>`;
+  html($('#grid'), list.length ? list.map(n => `<button class="card" data-id="${esc(n.id)}"><b>${esc(n.title || 'Sans titre')}</b><span>${esc(n.text || '')}</span><small>${n.recs ? I.mic + esc(n.recs) + ' · ' : ''}${esc(new Date(n.edited || Date.now()).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }))}</small></button>`).join('')
+    : `<div class="empty">${q ? 'Aucun résultat' : 'Aucune note.<br>Touchez + pour commencer.'}</div>`);
 }
 $('#q').addEventListener('input', renderList);
 $('#grid').addEventListener('click', e => { const c = e.target.closest('.card'); if (c) openNote(notes.find(n => n.id === c.dataset.id)); });
-const newNote = () => openNote({ id: uid(), title: '', html: '', text: '', recs: 0, updated: Date.now() });
+const newNote = () => openNote({ id: uid(), title: '', html: '', text: '', recs: 0, edited: Date.now(), team: null, _ts: {}, ver: 0, seq: 0 });
 
 // ---------- Éditeur ----------
 async function openNote(n) {
   cur = n; dirty = false; touched = false; range = null;
   $('#title').value = n.title || '';
   body.innerHTML = n.html || '';
-  $('#date').textContent = dfmt(n.updated);
+  $('#date').textContent = dfmt(n.edited || Date.now());
   showView('editor');
   $('.scroller').scrollTop = 0;
   if (!n.title && !n.html) setTimeout(() => $('#title').focus(), 50);
@@ -95,14 +95,13 @@ async function save() {
   const a = body.cloneNode(true); a.querySelectorAll('.rec').forEach(resetChip);
   const b = body.cloneNode(true); b.querySelectorAll('.rec').forEach(r => r.remove());
   b.querySelectorAll('div,p,li,br').forEach(e => e.before(' '));
-  cur.title = $('#title').value.trim();
-  cur.html = a.innerHTML;
-  cur.text = b.textContent.replace(/\s+/g, ' ').trim();
-  cur.recs = body.querySelectorAll('.rec').length;
-  cur.updated = Date.now();
-  await putNote(cur);
-  $('#date').textContent = dfmt(cur.updated);
-  syncSoon();
+  // Seuls les champs réellement modifiés sont horodatés (fusion champ par champ)
+  const v = { title: $('#title').value.trim(), html: a.innerHTML, text: b.textContent.replace(/\s+/g, ' ').trim(), recs: body.querySelectorAll('.rec').length };
+  const f = {}; for (const k in v) if (cur[k] !== v[k]) f[k] = v[k];
+  if (!Object.keys(f).length && cur.ver) return;
+  f.edited = Date.now();
+  edit('note', cur, f);
+  $('#date').textContent = dfmt(cur.edited);
 }
 $('#title').addEventListener('input', sched);
 body.addEventListener('input', e => {
@@ -185,16 +184,18 @@ body.addEventListener('click', e => {
   if (cb) { cb.classList.toggle('on'); sched(); }
 });
 // Lecteurs audio (notes, fiches de chant, chants d'un set)
-const recChanged = cont => cont === body ? (sched(), save()) : cont.recChanged();
+const recChanged = cont => { sched(); save(); };
 document.addEventListener('click', e => {
   const c = e.target.closest('.rec'); if (!c) return;
   const cont = c.closest('.recs') || body;
   e.preventDefault();
+  if (c.classList.contains('ro') && (e.target.closest('.nm') || e.target.closest('.x'))) { toast('Seuls son auteur et les responsables peuvent modifier cet enregistrement.'); return; }
   if (e.target.closest('.nm')) renameRec(c, cont);
   else if (e.target.closest('.sh')) shareRec(c);
   else if (e.target.closest('.x')) {
     ask('Supprimer cet enregistrement ?', async () => {
       if (playing && playing.chip === c) stopPlay();
+      if (cont !== body) { recOp(c, 'remove'); return; }
       c.remove(); await delAudio(c.dataset.id); cloudRemove([c.dataset.id]); recChanged(cont);
     });
   } else if (e.target.closest('.pl')) togglePlay(c);
@@ -298,7 +299,7 @@ function renameRec(c, cont = body) {
   s.querySelector('small').textContent = lines.length ? (cont === body ? 'Ou choisir une ligne de la note :' : 'Suggestions :') : '';
   const box = s.querySelector('.lines');
   for (const l of lines) { const b = document.createElement('button'); b.className = 'line'; b.textContent = l; box.append(b); }
-  const done = t => { setTitle(c, t); recChanged(cont); s.remove(); };
+  const done = t => { setTitle(c, t); if (cont === body) recChanged(cont); else recOp(c, 'rename', t); s.remove(); };
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } });
   s.addEventListener('click', e => {
     const b = e.target.closest('button');
@@ -434,122 +435,288 @@ function stopRec() {
   });
 }
 
-// ---------- Synchronisation entre appareils (Supabase) ----------
-// Notes : table « notes » (dernière modification gagne). Audio : bucket « audio », dossier = utilisateur.
-// Une note supprimée devient une « pierre tombale » (deleted) pour que la suppression se propage.
+// =====================================================================
+// ==========  Données partagées & synchronisation (Supabase)  ==========
+// =====================================================================
+// Chaque document (note, chant, set, élément de set, enregistrement, note perso) est une ligne
+// de la table « docs ». Pour gérer les modifications simultanées (plusieurs appareils, plusieurs
+// personnes), chaque champ garde l'heure de sa dernière modification (_ts) : à la fusion, champ
+// par champ, la modification la plus récente gagne. La fusion est faite de façon atomique sur le
+// serveur (fonction merge_doc) et de la même façon sur chaque appareil.
+// Les éléments d'un set et les enregistrements sont des documents séparés : deux personnes qui
+// modifient deux chants différents du même set, ou ajoutent chacune un enregistrement, ne se
+// gênent pas. Une suppression est définitive (« pierre tombale » deleted).
 const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
-let changedIds = new Set();
-let user = null, syncing = null, syncT, lastSync = 0, syncErr = '', syncStage = '', audioErr = '';
-async function removeNote(n, recIds) {
-  for (const id of recIds) await delAudio(id);
-  cloudRemove(recIds);
-  if (n.synced) await putNote({ id: n.id, deleted: true, updated: Date.now() });
-  else await delNote(n.id);
+const KIND_STORE = { note: 'notes', song: 'songs', set: 'sets', item: 'items', rec: 'recs', pnote: 'pnotes' };
+const META = ['id', 'team', 'ver', 'dirty', 'deleted', 'seq', 'uid'];
+const MEM = { song: songs, set: sets, item: items, rec: recDocs, pnote: pnotes };
+let user = null, clockOff = 0, syncing = null, syncT, pushT, pushing = null, pushAgain = false;
+let lastSync = 0, syncErr = '', audioErr = '';
+const now = () => Date.now() + clockOff;
+const dataOf = o => { const d = {}; for (const k in o) if (!META.includes(k)) d[k] = o[k]; return d; };
+const memOf = (kind, id) => kind === 'note' ? (cur && cur.id === id ? cur : null) : (MEM[kind] && MEM[kind].get(id)) || null;
+const recIdsOf = html => { const t = document.createElement('template'); t.innerHTML = html || ''; return [...t.content.querySelectorAll('.rec')].map(r => r.dataset.id); };
+const errText = e => (e && ((e.name && e.name !== 'Error' ? e.name + ' : ' : '') + (e.message || e.code || ''))) || String(e);
+
+// ---------- Écriture locale ----------
+// Les modifications sont enregistrées sur l'appareil après 250 ms (au plus tard 1 s pendant une
+// saisie continue), puis envoyées aussitôt.
+const pend = new Map(); let pendT, pendSince = 0;
+function storeLocal(kind, o) {
+  pend.set(kind + ':' + o.id, [kind, o]);
+  if (!pendSince) pendSince = Date.now();
+  clearTimeout(pendT);
+  pendT = setTimeout(flush, Date.now() - pendSince > 1000 ? 0 : 250);
 }
-// Identifiants audio utilisés par un document (note, chant ou set)
-const audioIdsOf = (st, o) => st === 'notes' ? recIdsOf(o.html) : st === 'songs' ? (o.recs || []).map(r => r.id) : (o.items || []).flatMap(it => (it.recs || []).map(r => r.id));
+async function flush() {
+  clearTimeout(pendT); pendSince = 0;
+  const ps = [...pend.values()]; pend.clear();
+  for (const [kind, o] of ps) {
+    if (o.deleted && !o.ver) await del(KIND_STORE[kind], o.id); // jamais envoyé : rien à propager
+    else await put(KIND_STORE[kind], o);
+  }
+  if (ps.length) pushSoon();
+}
+// Modifie des champs d'un document (chaque champ modifié est horodaté)
+function edit(kind, o, fields) {
+  const t = now(); o._ts = { ...(o._ts || {}) };
+  for (const k in fields) { o[k] = fields[k]; o._ts[k] = t; }
+  if (o.team && user) { o._by = user.id; o._ts._by = t; }
+  o.dirty = true; o.seq = (o.seq || 0) + 1;
+  storeLocal(kind, o);
+  return o;
+}
+function create(kind, fields, team = null) {
+  const t = now(), o = { id: uid(), ...fields, team: team || null, _ts: {}, ver: 0, dirty: true, seq: 1 };
+  for (const k in fields) o._ts[k] = t;
+  if (o.team && user) { o._by = user.id; o._ts._by = t; }
+  if (MEM[kind]) MEM[kind].set(o.id, o);
+  storeLocal(kind, o);
+  return o;
+}
+function remove(kind, o) {
+  o.deleted = true; o.dirty = true; o.seq = (o.seq || 0) + 1;
+  if (MEM[kind]) MEM[kind].delete(o.id);
+  if (kind === 'rec') { delAudio(o.id); if (user && (!o.owner || o.owner === user.id)) cloudRemove([o.id]); }
+  storeLocal(kind, o);
+}
 function cloudRemove(ids) {
   if (sb && user && ids.length) sb.storage.from('audio').remove(ids.map(id => user.id + '/' + id)).catch(() => {});
 }
-const recIdsOf = html => { const t = document.createElement('template'); t.innerHTML = html || ''; return [...t.content.querySelectorAll('.rec')].map(r => r.dataset.id); };
-function syncUI() {
-  const c = $('#cloud');
-  c.classList.toggle('on', !!user); c.classList.toggle('busy', !!syncing); c.classList.toggle('err', !!(user && syncErr));
-  $('#sync').textContent = !user ? '' : syncErr ? '· erreur de synchro' : !navigator.onLine ? '· hors ligne' : lastSync ? '· synchronisé ' + new Date(lastSync).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+async function removeNote(n, recIds) {
+  for (const id of recIds) await delAudio(id);
+  cloudRemove(recIds);
+  remove('note', n);
 }
-function syncSoon(ms = 700) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
-function sync() {
+
+// ---------- Réception d'un document du serveur ----------
+// Ancien format (avant la fusion par champ) : on le convertit à la volée.
+function normalize(row) {
+  const d = { ...(row.data || {}) };
+  const ts = d._ts ? { ...d._ts } : {};
+  if (!d._ts) for (const k in d) ts[k] = row.updated;
+  delete d._ts;
+  if (row.kind === 'set' && Array.isArray(d.items)) {
+    d.items.forEach((it, i) => {
+      if (!it || !it.id || items.has(it.id)) return;
+      const t = row.updated, f = { setId: row.id, songId: it.songId, title: it.title || '', key: it.key || null, struct: it.struct || null, lead: it.lead || '', note: it.note || '', pos: i };
+      const o = { id: it.id, ...f, team: row.team_id || null, _ts: Object.fromEntries(Object.keys(f).map(k => [k, t])), ver: 0, dirty: true, seq: 1 };
+      items.set(o.id, o); storeLocal('item', o);
+      for (const r of it.recs || []) legacyRec(r, it.id, row);
+    });
+  }
+  if (row.kind === 'song' && Array.isArray(d.recs)) for (const r of d.recs) legacyRec(r, row.id, row);
+  if (row.kind === 'set') delete d.items;
+  if (row.kind === 'song') delete d.recs;
+  return { ...d, id: row.id, team: row.team_id || null, ver: row.updated, deleted: !!row.deleted, uid: row.user_id, _ts: ts };
+}
+function legacyRec(r, parentId, row) {
+  if (!r || !r.id || recDocs.has(r.id)) return;
+  const t = row.updated, f = { parentId, title: r.title || '', d: r.d || 0, owner: row.user_id, at: t };
+  const o = { id: r.id, ...f, team: row.team_id || null, _ts: Object.fromEntries(Object.keys(f).map(k => [k, t])), ver: 0, dirty: true, seq: 1 };
+  recDocs.set(o.id, o); storeLocal('rec', o);
+}
+const changedKinds = new Set(); let refreshT;
+async function applyRow(row) {
+  const kind = row.kind, st = KIND_STORE[kind]; if (!st || !row.id) return false;
+  let o = memOf(kind, row.id) || await get(st, row.id);
+  if (o && o.ver >= row.updated && !(row.deleted && !o.deleted)) return false; // déjà à jour
+  const r = normalize(row);
+  let n;
+  if (!o || !o.dirty || r.deleted) n = { ...r, dirty: false, seq: o ? o.seq || 0 : 0 };
+  else {
+    // Modifié ici et ailleurs : champ par champ, le plus récent gagne ; on garde « dirty »
+    // pour renvoyer nos champs gagnants au serveur.
+    n = o; const ts = { ...(o._ts || {}) };
+    for (const k in r) {
+      if (META.includes(k) || k === '_ts') continue;
+      if ((r._ts[k] || 0) > (ts[k] || 0)) { n[k] = r[k]; ts[k] = r._ts[k]; if (kind === 'note' && n === cur && k === 'title') setV('#title', r[k]); }
+    }
+    n._ts = ts; n.ver = r.ver; n.team = r.team; n.uid = r.uid;
+  }
+  if (n.deleted) {
+    if (o) for (const id of kind === 'rec' ? [o.id] : kind === 'note' ? recIdsOf(o.html) : []) delAudio(id);
+    if (MEM[kind]) MEM[kind].delete(row.id);
+    pend.delete(kind + ':' + row.id);
+    await del(st, row.id);
+    if (kind === 'note' && cur && cur.id === row.id) { cur = null; showList(); toast('Cette note a été supprimée sur un autre appareil.'); }
+  } else {
+    if (kind === 'note' && cur && cur.id === row.id && n !== cur) {
+      const before = cur.html, beforeT = cur.title;
+      for (const k of Object.keys(cur)) if (!(k in n)) delete cur[k];
+      Object.assign(cur, n); n = cur;
+      if (!touched && (before !== cur.html || beforeT !== cur.title)) refreshNoteEditor();
+    } else if (MEM[kind]) {
+      const m = MEM[kind].get(row.id);
+      if (m && m !== n) { for (const k of Object.keys(m)) if (!(k in n)) delete m[k]; Object.assign(m, n); n = m; }
+      else MEM[kind].set(row.id, n);
+    }
+    await put(st, n);
+    if (kind === 'rec' || (kind === 'note' && recIdsOf(n.html).length)) audioSoon();
+  }
+  changedKinds.add(kind);
+  clearTimeout(refreshT); refreshT = setTimeout(refreshUI, 30);
+  return true;
+}
+// Note ouverte modifiée ailleurs (et pas en cours d'écriture ici) : on met à jour sans fermer
+async function refreshNoteEditor() {
+  if (!cur || $('#editor').classList.contains('hidden')) return;
+  const sc = $('.scroller').scrollTop;
+  setV('#title', cur.title || '');
+  body.innerHTML = cur.html || '';
+  for (const old of body.querySelectorAll('.rec')) { const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title); old.replaceWith(c); loadAudio(c.dataset.id); }
+  $('#date').textContent = dfmt(cur.edited || Date.now());
+  $('.scroller').scrollTop = sc;
+}
+
+// ---------- Envoi ----------
+function pushSoon(ms = 120) { if (!sb || !user) return; clearTimeout(pushT); pushT = setTimeout(push, ms); }
+function push() {
+  if (!sb || !user || !navigator.onLine) return Promise.resolve();
+  if (pushing) { pushAgain = true; return pushing; }
+  pushing = (async () => {
+    await flush();
+    const todo = [];
+    for (const [kind, st] of Object.entries(KIND_STORE)) for (const o of await all(st)) if (o.dirty) todo.push([kind, memOf(kind, o.id) || o]);
+    for (const [kind, o] of todo) {
+      if (!o.dirty) continue;
+      const seq = o.seq;
+      if (kind === 'rec' && !o.owner) edit('rec', o, { owner: user.id });
+      await uploadAudio(kind, o);
+      const t0 = Date.now();
+      const { data: row, error } = await sb.rpc('merge_doc', { p_id: o.id, p_kind: kind, p_team: o.team || null, p_data: dataOf(o), p_deleted: !!o.deleted });
+      if (error) {
+        // Refus (droits) : on abandonne la modification locale et on reprend la version du serveur
+        if (/row-level security|permission|42501|23505|duplicate key/i.test(error.message + ' ' + error.code)) { await discard(kind, o); continue; }
+        throw error;
+      }
+      // Décalage d'horloge de cet appareil (pour horodater les champs à l'heure du serveur)
+      const off = row.updated - Math.round((t0 + Date.now()) / 2);
+      if (Math.abs(off - clockOff) > 1500) clockOff = off;
+      if (o.seq === seq) o.dirty = false;
+      if (o.deleted && !o.dirty) { await del(KIND_STORE[kind], o.id); continue; }
+      o.ver = Math.max(o.ver || 0, row.updated - 1);
+      await put(KIND_STORE[kind], o);
+      await applyRow(row);
+    }
+    lastSync = Date.now(); syncErr = '';
+  })().catch(e => { syncErr = errText(e); console.warn('envoi', e); })
+    .finally(() => { pushing = null; syncUI(); if (pushAgain) { pushAgain = false; pushSoon(); } });
+  syncUI();
+  return pushing;
+}
+async function discard(kind, o) {
+  toast('Modification refusée : seuls les responsables de l\'équipe peuvent modifier cet élément.');
+  o.dirty = false; o.ver = 0;
+  const { data } = await sb.from('docs').select('id,kind,team_id,user_id,data,updated,deleted').eq('id', o.id).maybeSingle();
+  if (data) await applyRow(data);
+  else { if (MEM[kind]) MEM[kind].delete(o.id); await del(KIND_STORE[kind], o.id); refreshUI(); }
+}
+async function uploadAudio(kind, o) {
+  const ids = o.deleted ? [] : kind === 'note' ? recIdsOf(o.html) : kind === 'rec' && o.owner === user.id ? [o.id] : [];
+  for (const id of ids) {
+    try {
+      const a = await getAudio(id);
+      if (!a || a.up) continue;
+      const { error } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
+      if (error) throw error;
+      await putAudio({ ...a, up: true });
+    } catch (e) { audioErr = errText(e); console.warn('audio', id, e); }
+  }
+}
+
+// ---------- Réception (rattrapage) ----------
+// Au démarrage, au retour dans l'app et toutes les 60 s : on récupère seulement ce qui a changé
+// depuis la dernière fois. Le reste du temps, le temps réel apporte les modifications.
+async function pull(full) {
+  const key = 'pull:' + user.id;
+  let since = full ? 0 : +pref(key, 0);
+  for (let guard = 0; guard < 50; guard++) {
+    const { data, error } = await sb.from('docs').select('id,kind,team_id,user_id,data,updated,deleted').gte('updated', since).order('updated').limit(500);
+    if (error) throw error;
+    for (const row of data) await applyRow(row);
+    if (data.length) { since = data[data.length - 1].updated; setPref(key, since); }
+    if (data.length < 500) break;
+  }
+}
+const audioFail = new Map(); let audioT;
+// Un enregistrement reçu en temps réel : on télécharge son audio aussitôt
+function audioSoon() { if (!sb || !user) return; clearTimeout(audioT); audioT = setTimeout(() => fetchMissingAudio().catch(() => {}), 300); }
+async function fetchMissingAudio() {
+  const want = [];
+  for (const n of await all('notes')) if (!n.deleted) for (const id of recIdsOf(n.html)) want.push([id, user.id]);
+  for (const r of recDocs.values()) want.push([r.id, r.owner || r.uid || user.id]);
+  for (const [id, owner] of want) {
+    if (Date.now() - (audioFail.get(id) || 0) < 60000) continue;
+    try {
+      if (await getAudio(id)) continue;
+      const { data, error } = await sb.storage.from('audio').download(owner + '/' + id);
+      if (error) throw error;
+      if (data) {
+        await putAudio({ id, blob: new Blob([await data.arrayBuffer()], { type: baseType(data.type) }), d: 0, up: true });
+        audioFail.delete(id);
+        if (document.querySelector(`.rec[data-id="${CSS.escape(id)}"]`)) loadAudio(id);
+      }
+    } catch (e) { audioFail.set(id, Date.now()); audioErr = errText(e); console.warn('audio', id, e); }
+  }
+}
+function syncSoon(ms = 300) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(() => sync(), ms); }
+function sync(full) {
   if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
-  if (syncing) return syncing.then(() => sync());
-  syncStage = 'lecture';
-  syncing = doSync().then(() => { syncErr = ''; lastSync = Date.now(); }, e => { syncErr = '[' + syncStage + '] ' + ((e && (e.name && e.name !== 'Error' ? e.name + ' : ' : '') + (e.message || '')) || String(e)); console.warn('sync', e); })
+  if (syncing) return syncing;
+  audioErr = '';
+  syncing = (async () => { await push(); await pull(full); await push(); await fetchMissingAudio(); lastSync = Date.now(); syncErr = ''; })()
+    .catch(e => { syncErr = errText(e); console.warn('sync', e); })
     .finally(() => { syncing = null; syncUI(); });
   syncUI();
   return syncing;
 }
-const KINDS = { note: 'notes', song: 'songs', set: 'sets' };
-// Contenu d'un document sans ses métadonnées de synchro
-// (base = contenu tel qu'il était à la dernière synchro, pour savoir quels champs ont changé ici)
-const strip = o => { const { id, updated, synced, deleted, base, ...d } = o; return d; };
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-// Champs modifiés sur cet appareil depuis la dernière synchro
-const localKeys = o => o && o.base ? Object.keys(strip(o)).filter(k => !same(o[k], o.base[k])) : o ? Object.keys(strip(o)) : [];
-async function doSync() {
-  const { data: remote, error } = await sb.from('docs').select('id,kind,data,updated,deleted');
-  if (error) throw error;
-  await flush();
-  let changed = false; audioErr = ''; changedIds = new Set();
-  for (const [kind, st] of Object.entries(KINDS)) {
-    const local = new Map((await all(st)).map(n => [n.id, n]));
-    const rows = remote.filter(r => r.kind === kind), rmap = new Map(rows.map(r => [r.id, r]));
-    // 1. Réception : documents plus récents sur le serveur
-    for (const r of rows) {
-      const l = local.get(r.id);
-      // Rien de nouveau sur le serveur depuis notre dernière synchro
-      if (l && (l.synced === r.updated || (l.synced == null && l.updated >= r.updated))) continue;
-      if (kind === 'note' && cur && cur.id === r.id && touched) continue; // note en cours d'écriture ici
-      if (r.deleted) {
-        if (l) { for (const id of audioIdsOf(st, l)) await delAudio(id); await put(st, { id: r.id, deleted: true, updated: r.updated, synced: r.updated }); changed = true; }
-        continue;
-      }
-      syncStage = 'réception ' + kind;
-      const n = { ...r.data, id: r.id, updated: r.updated, synced: r.updated, base: r.data };
-      // Modifié des deux côtés : on prend la version du serveur et on y garde les champs modifiés ici
-      if (l && !l.deleted && l.synced !== l.updated) {
-        const keys = localKeys(l);
-        for (const k of keys) n[k] = l[k];
-        if (keys.length) n.updated = Math.max(Date.now(), r.updated + 1);
-      }
-      await put(st, n); changed = true; changedIds.add(r.id);
-      local.set(r.id, n);
-      if (kind === 'note' && cur && cur.id === n.id && !touched) { const sc = $('.scroller').scrollTop; await openNote(n); $('.scroller').scrollTop = sc; }
-    }
-    // 2. Envoi : documents modifiés ici depuis la dernière synchro
-    for (const l of local.values()) {
-      const r = rmap.get(l.id);
-      if (l.synced === l.updated && r) continue;
-      if (r && r.updated >= l.updated) continue;
-      if (l.deleted && !r) { await del(st, l.id); continue; }
-      syncStage = 'envoi ' + kind;
-      if (!l.deleted) for (const id of audioIdsOf(st, l)) {
-        try {
-          const a = await getAudio(id);
-          if (!a || a.up) continue;
-          syncStage = 'envoi audio';
-          const { error: e } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
-          if (e) throw e;
-          await putAudio({ ...a, up: true });
-        } catch (e) { audioErr = (e && (e.name ? e.name + ' : ' : '') + (e.message || '')) || String(e); console.warn('audio', id, e); }
-        syncStage = 'envoi ' + kind;
-      }
-      const row = { id: l.id, user_id: user.id, kind, data: l.deleted ? {} : strip(l), updated: l.updated, deleted: !!l.deleted };
-      const { error: e } = await sb.from('docs').upsert(row);
-      if (e) throw e;
-      const fresh = await get(st, l.id);
-      if (fresh && fresh.updated === l.updated) await put(st, { ...fresh, synced: l.updated, base: strip(l) });
-      const mem = st === 'songs' ? songs.get(l.id) : st === 'sets' ? sets.get(l.id) : st === 'notes' && cur && cur.id === l.id ? cur : null;
-      if (mem && mem.updated === l.updated) { mem.synced = l.updated; mem.base = strip(l); }
-    }
-  }
-  // 3. Audios manquants sur cet appareil : téléchargés à part, un échec ne bloque pas la synchro
-  //    (ils seront retentés à la prochaine synchro)
-  syncStage = 'téléchargement audio';
-  let gotAudio = false;
-  for (const st of Object.values(KINDS)) for (const o of await all(st)) {
-    if (o.deleted) continue;
-    for (const id of audioIdsOf(st, o)) {
-      try {
-        if (await getAudio(id)) continue;
-        const { data, error: e } = await sb.storage.from('audio').download(user.id + '/' + id);
-        if (e) throw e;
-        if (data) { await putAudio({ id, blob: new Blob([await data.arrayBuffer()], { type: baseType(data.type) }), d: 0, up: true }); gotAudio = true; }
-      } catch (e) { audioErr = (e && (e.name ? e.name + ' : ' : '') + (e.message || '')) || String(e); console.warn('audio', id, e); }
-    }
-  }
-  if (gotAudio && cur && !touched && !$('#editor').classList.contains('hidden')) { const sc = $('.scroller').scrollTop; await openNote(cur); $('.scroller').scrollTop = sc; }
-  if (changed || gotAudio) { await loadDocs(); refreshAfterSync(); }
+function syncUI() {
+  const c = $('#cloud');
+  c.classList.toggle('on', !!user); c.classList.toggle('busy', !!(syncing || pushing)); c.classList.toggle('err', !!(user && syncErr));
+  $('#sync').textContent = !user ? '' : syncErr ? '· erreur de synchro' : !navigator.onLine ? '· hors ligne' : lastSync ? '· synchronisé' : '';
 }
-// Fenêtre « Synchronisation » : connexion / déconnexion
+
+// ---------- Temps réel ----------
+let rt = null, rowQ = Promise.resolve();
+function live() {
+  if (rt) { try { sb.removeChannel(rt); } catch (e) {} rt = null; }
+  if (!user) return;
+  try {
+    rt = sb.channel('sync-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'docs' }, p => {
+        const row = p.new;
+        if (!row || !row.id) return;
+        if (!('data' in row)) return syncSoon(100);
+        rowQ = rowQ.then(() => applyRow(row)).catch(e => console.warn('temps réel', e));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'team_members' }, () => loadTeams(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => loadTeams())
+      .subscribe(st => { if (st === 'SUBSCRIBED') syncSoon(50); });
+  } catch (e) { rt = null; console.warn('temps réel indisponible', e); } // la synchro classique continue
+}
+
+// ---------- Fenêtre « Réglages et synchronisation » ----------
 function cloudSheet() {
   const s = document.createElement('div'); s.className = 'sheet';
   if (!sb) {
@@ -559,7 +726,7 @@ function cloudSheet() {
     s.querySelector('.who').textContent = 'Connecté : ' + user.email;
     s.querySelector('.st').textContent = (syncErr ? 'Erreur : ' + syncErr : lastSync ? 'Dernière synchro : ' + new Date(lastSync).toLocaleString('fr-FR') : '') + (audioErr ? ' — Audio non transféré (réessai automatique) : ' + audioErr : '');
   } else {
-    s.innerHTML = '<div><p>Synchroniser mes notes</p><small>Connecte-toi avec le même compte sur chaque appareil (téléphone, tablette…).</small><input class="em" type="email" placeholder="E-mail" autocomplete="email"><input class="pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"><button class="ok in">Se connecter</button><button class="alt up">Créer un compte</button><button class="cancel">Annuler</button></div>';
+    s.innerHTML = '<div><p>Synchroniser mes notes</p><small>Connecte-toi avec le même compte sur chaque appareil (téléphone, tablette…). Il faut aussi un compte pour travailler en équipe.</small><input class="em" type="email" placeholder="E-mail" autocomplete="email"><input class="pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"><button class="ok in">Se connecter</button><button class="alt up">Créer un compte</button><button class="cancel">Annuler</button></div>';
   }
   s.firstChild.insertAdjacentHTML('afterbegin', '<p>Réglages</p><small>Notation des tonalités</small><div class="seg"><button data-n="fr">Do Ré Mi</button><button data-n="en">C D E</button></div>');
   const markN = () => s.querySelectorAll('[data-n]').forEach(x => x.classList.toggle('on', x.dataset.n === notation));
@@ -569,8 +736,8 @@ function cloudSheet() {
     if (e.target === s || (b && b.classList.contains('cancel'))) { s.remove(); return; }
     if (!b) return;
     if (b.dataset.n) { notation = b.dataset.n; setPref('notation', notation); markN(); render(); return; }
-    if (b.classList.contains('now')) { s.remove(); await sync(); toast(syncErr ? 'Erreur de synchro : ' + syncErr : 'Notes synchronisées'); return; }
-    if (b.classList.contains('out')) { await sb.auth.signOut(); s.remove(); toast('Déconnecté. Les notes restent sur cet appareil.'); return; }
+    if (b.classList.contains('now')) { s.remove(); await sync(true); toast(syncErr ? 'Erreur de synchro : ' + syncErr : 'Tout est synchronisé'); return; }
+    if (b.classList.contains('out')) { await flush(); await sb.auth.signOut(); s.remove(); toast('Déconnecté. Tes données perso restent sur cet appareil.'); return; }
     const email = s.querySelector('.em').value.trim(), password = s.querySelector('.pw').value;
     if (!email || password.length < 6) { toast('E-mail et mot de passe (6 caractères min.) requis'); return; }
     b.disabled = true;
@@ -591,36 +758,16 @@ function cloudSheet() {
   document.body.append(s);
 }
 $('#cloud').onclick = cloudSheet;
-if (sb) {
-  sb.auth.onAuthStateChange((ev, session) => {
-    const was = user && user.id; user = session ? session.user : null;
-    if ((user && user.id) !== was) live();
-    if (user && user.id !== was) sync(); else syncUI();
-  });
-  // Temps réel : dès qu'un autre appareil enregistre une modification, Supabase prévient
-  // cet appareil, qui se synchronise aussitôt (sans recharger la page)
-  let rt = null;
-  function live() {
-    if (rt) { try { sb.removeChannel(rt); } catch (e) {} rt = null; }
-    if (!user) return;
-    try {
-      rt = sb.channel('docs-' + user.id)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'docs', filter: 'user_id=eq.' + user.id }, () => syncSoon(300))
-        .subscribe(st => { if (st === 'SUBSCRIBED') syncSoon(100); });
-    } catch (e) { rt = null; console.warn('temps réel indisponible', e); } // la synchro classique continue
-  }
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSoon(100); });
-  addEventListener('online', () => syncSoon(100)); addEventListener('offline', syncUI);
-  setInterval(() => { if (!document.hidden) sync(); }, 30000);
-}
-syncUI();
+
 // =====================================================================
 // ===============  Bibliothèque de chants & sets  =====================
 // =====================================================================
-// Chant : { id, title, artist, key, bpm, sig, dur (s), style, struct[], links, notes, recs[], updated }
-// Set   : { id, name, date (AAAA-MM-JJ), items[], notes, updated }
-// Élément de set : { id, songId, title (copie), key|null, struct|null, lead, note, recs[] }
-//   key / struct à null = on reprend ceux de la fiche du chant.
+// Chant : { title, artist, key, bpm, sig, dur (s), style, struct[], links, notes }
+// Set   : { name, date (AAAA-MM-JJ), notes }
+// Élément de set : { setId, songId, title (copie), key|null, struct|null, lead, note, pos }
+//   key / struct à null = on reprend ceux de la fiche du chant ; pos = ordre dans le set.
+// Enregistrement : { parentId (chant ou élément de set), title, d (s), owner, at }
+// + pour tous : team (équipe ou null = perso), _ts (horodatage par champ), _by (dernier auteur).
 // Section de structure : { t: 'C', n: 1, x: 2, i: 'doux' }  →  « C1 ×2 doux »
 
 // ---------- Préférences ----------
@@ -629,54 +776,6 @@ function setPref(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 var notation = pref('notation', 'fr');
 let tab = pref('tab', 'sets');
 if (!['sets', 'songs', 'notes'].includes(tab)) tab = 'sets';
-
-// ---------- Données en mémoire ----------
-async function loadDocs() {
-  for (const [st, map] of [['songs', songs], ['sets', sets]]) {
-    const seen = new Set();
-    for (const o of await all(st)) {
-      if (o.deleted) continue;
-      seen.add(o.id);
-      const m = map.get(o.id);
-      if (!m) { map.set(o.id, o); continue; }
-      // Mise à jour sur place (les écrans ouverts gardent le même objet).
-      // Si une saisie n'est pas encore enregistrée, on garde les champs modifiés ici.
-      const keep = pend.has(st + ':' + o.id) ? localKeys(m) : [];
-      const kept = {}; for (const k of keep) kept[k] = m[k];
-      const upd = m.updated;
-      for (const k of Object.keys(m)) if (!(k in o)) delete m[k];
-      Object.assign(m, o, kept);
-      if (keep.length) m.updated = Math.max(upd, o.updated);
-    }
-    for (const id of [...map.keys()]) if (!seen.has(id) && !pend.has(st + ':' + id)) map.delete(id);
-  }
-  refreshStyles();
-}
-// Enregistrement différé (400 ms) des chants / sets modifiés
-const pend = new Map(); let pendT;
-function touch(st, o) {
-  o.updated = Date.now(); editTouched.add(o.id);
-  pend.set(st + ':' + o.id, [st, o]);
-  clearTimeout(pendT); pendT = setTimeout(flush, 400);
-}
-async function flush() {
-  clearTimeout(pendT);
-  const ps = [...pend.values()]; pend.clear();
-  for (const [st, o] of ps) await put(st, o);
-  if (ps.length) syncSoon();
-}
-async function removeDoc(st, o) {
-  const ids = audioIdsOf(st, o);
-  for (const id of ids) await delAudio(id);
-  cloudRemove(ids);
-  (st === 'songs' ? songs : sets).delete(o.id); pend.delete(st + ':' + o.id);
-  if (o.synced) await put(st, { id: o.id, deleted: true, updated: Date.now() }); else await del(st, o.id);
-  syncSoon(300);
-}
-const newSong = title => {
-  const s = { id: uid(), title, artist: '', key: '', bpm: '', sig: '', dur: 0, style: '', struct: [], links: '', notes: '', recs: [], updated: Date.now() };
-  songs.set(s.id, s); return s;
-};
 
 // ---------- Tonalités ----------
 const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -744,16 +843,16 @@ function structEditor(host, getSt, setSt) {
   pal.innerHTML = Object.keys(SEC).map(t => `<button type="button" data-t="${t}" style="--c:${secColor(t)}" aria-label="${SEC[t][0]}">${t}</button>`).join('');
   const draw = () => {
     const st = getSt();
-    wrap.innerHTML = st.length ? pillsHTML(st) : '<span class="empty-st">Touchez les sections ci-dessous dans l\'ordre, ou utilisez la saisie rapide.</span>';
+    html(wrap, st.length ? pillsHTML(st) : '<span class="empty-st">' + (host.closest('.ro') ? 'Pas de structure.' : 'Touchez les sections ci-dessous dans l\'ordre, ou utilisez la saisie rapide.') + '</span>');
     if (document.activeElement !== quick) quick.value = stText(st);
   };
   pal.addEventListener('click', e => {
-    const b = e.target.closest('[data-t]'); if (!b) return;
+    const b = e.target.closest('[data-t]'); if (!b || host.closest('.ro')) return;
     const st = getSt().map(x => ({ ...x })), t = b.dataset.t;
     st.push({ t, n: t === 'C' ? 1 + Math.max(0, ...st.filter(x => x.t === 'C').map(x => x.n || 0)) : 0, x: 1, i: '' });
     setSt(st); draw();
   });
-  wrap.addEventListener('click', e => { const p = e.target.closest('.pill'); if (p) pillSheet(+p.dataset.i); });
+  wrap.addEventListener('click', e => { const p = e.target.closest('.pill'); if (p && !host.closest('.ro')) pillSheet(+p.dataset.i); });
   quick.addEventListener('change', () => { setSt(parseSt(quick.value)); draw(); });
   quick.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); quick.blur(); } });
   function pillSheet(i) {
@@ -802,34 +901,237 @@ function sheet(html) {
   s.addEventListener('click', e => { if (e.target === s || e.target.closest('.cancel')) s.remove(); });
   document.body.append(s); return s;
 }
+// Remplace le contenu d'un élément seulement s'il a changé (pas de clignotement)
+function html(el, s) { if (el.__h !== s) { el.innerHTML = s; el.__h = s; } }
+// Écrit une valeur dans un champ seulement si elle a changé (le curseur ne saute pas pendant la saisie)
+function setV(sel, v) { const e = $(sel); v = v == null ? '' : String(v); if (e.value !== v) e.value = v; }
 const parseDur = v => { const m = String(v || '').trim().match(/^(\d{1,3})(?:\s*[:h'.,]\s*(\d{1,2}))?$/); return m ? (+m[1]) * 60 + (+(m[2] || 0)) : 0; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const dParse = iso => /^\d{4}-\d\d-\d\d$/.test(iso || '') ? new Date(iso + 'T12:00:00') : null;
 const dShort = iso => { const d = dParse(iso); return d ? d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : ''; };
+function ago(t) {
+  if (!t) return '';
+  const s = (now() - t) / 1000;
+  return s < 60 ? 'à l\'instant' : s < 3600 ? 'il y a ' + Math.round(s / 60) + ' min' : s < 86400 ? 'il y a ' + Math.round(s / 3600) + ' h' : 'le ' + new Date(t).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+// « Modifié par Marie · il y a 5 min »
+function modLine(o) {
+  if (!o || !o._ts) return '';
+  const t = Math.max(0, ...Object.entries(o._ts).filter(([k]) => k !== 'pos').map(([, v]) => +v || 0));
+  if (t < 1e12) return '';
+  const who = o.team && o._by ? (o._by === (user && user.id) ? 'toi' : memberName(o.team, o._by)) : '';
+  return 'Modifié ' + (who ? 'par ' + who + ' · ' : '') + ago(t);
+}
+
+// ---------- Équipes ----------
+let teams = [], members = [];
+try { const c = JSON.parse(pref('teams', '[]')); teams = c.teams || []; members = c.members || []; } catch (e) {}
+let space = pref('space', '');
+const teamOf = id => teams.find(t => t.id === id);
+const myRole = team => !team ? 'admin' : (teamOf(team) || {}).role || '';
+const canEdit = team => myRole(team) === 'admin';
+const inSpace = o => (o.team || '') === space;
+const memberName = (team, id) => { const m = members.find(x => x.team_id === team && x.user_id === id); return (m && m.name) || 'un membre'; };
+async function loadTeams(membership) {
+  if (!sb || !user) return;
+  const [{ data: ms, error: e1 }, { data: ts, error: e2 }] = await Promise.all([
+    sb.from('team_members').select('team_id,user_id,role,name,joined_at'), sb.from('teams').select('id,name,code')]);
+  if (e1 || e2) { console.warn('équipes', e1 || e2); return; }
+  const had = teams.map(t => t.id).sort().join();
+  members = ms; teams = ts.map(t => ({ ...t, role: (ms.find(m => m.team_id === t.id && m.user_id === user.id) || {}).role })).filter(t => t.role);
+  setPref('teams', JSON.stringify({ teams, members }));
+  if (space && !teamOf(space)) { space = ''; setPref('space', ''); }
+  // Équipes quittées : on retire leurs documents de cet appareil
+  for (const kind of ['song', 'set', 'item', 'rec']) for (const o of [...MEM[kind].values()]) if (o.team && !teamOf(o.team)) { MEM[kind].delete(o.id); del(KIND_STORE[kind], o.id); }
+  if (membership && had !== teams.map(t => t.id).sort().join()) await sync(true);
+  refreshUI(true);
+}
+function spaceName(id) { return id ? (teamOf(id) || {}).name || 'Équipe' : 'Mon espace'; }
+function spaceSheet() {
+  const list = [{ id: '', name: 'Mon espace', sub: 'Perso, visible par toi seul' }, ...teams.map(t => ({ id: t.id, name: t.name, sub: t.role === 'admin' ? 'Équipe · responsable' : 'Équipe · musicien' }))];
+  const sh = sheet('<p>Espace de travail</p><div class="pick"></div>'
+    + (user ? '<button class="ok mk">+ Créer une équipe</button><button class="alt jn">Rejoindre une équipe avec un code</button>' + (space ? '<button class="alt mg">Gérer l\'équipe « ' + esc(spaceName(space)) + ' »</button>' : '')
+      : '<small>Connecte-toi (bouton nuage) pour créer ou rejoindre une équipe.</small>')
+    + '<button class="cancel">Fermer</button>');
+  sh.querySelector('.pick').innerHTML = list.map(x => `<button data-space="${esc(x.id)}" class="${x.id === space ? 'on' : ''}"><b>${esc(x.name)}</b><em>${esc(x.sub)}</em></button>`).join('');
+  sh.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.space != null) { space = b.dataset.space; setPref('space', space); sh.remove(); nav = []; render(); }
+    else if (b.classList.contains('mk')) { sh.remove(); teamForm('create'); }
+    else if (b.classList.contains('jn')) { sh.remove(); teamForm('join'); }
+    else if (b.classList.contains('mg')) { sh.remove(); manageTeam(space); }
+  });
+}
+function teamForm(mode, code) {
+  const sh = sheet(mode === 'create'
+    ? '<p>Créer une équipe</p><input class="fld tn" placeholder="Nom de l\'équipe (ex. Louange Église X)" autocomplete="off"><input class="fld yn" placeholder="Ton prénom (visible par l\'équipe)" autocomplete="given-name"><small>Tu seras responsable de l\'équipe. Tu pourras ensuite inviter les membres avec un code.</small><button class="ok go">Créer</button><button class="cancel">Annuler</button>'
+    : '<p>Rejoindre une équipe</p><input class="fld tc" placeholder="Code d\'invitation (6 caractères)" autocomplete="off" autocapitalize="characters"><input class="fld yn" placeholder="Ton prénom (visible par l\'équipe)" autocomplete="given-name"><button class="ok go">Rejoindre</button><button class="cancel">Annuler</button>');
+  const yn = sh.querySelector('.yn'); yn.value = pref('myname', '');
+  if (code) sh.querySelector('.tc').value = code;
+  sh.querySelector('.go').onclick = async () => {
+    const name = clean(yn.value); if (!name) { toast('Indique ton prénom'); return; }
+    setPref('myname', name);
+    const { data, error } = mode === 'create'
+      ? await sb.rpc('create_team', { p_name: clean(sh.querySelector('.tn').value), p_member_name: name })
+      : await sb.rpc('join_team', { p_code: clean(sh.querySelector('.tc').value), p_member_name: name });
+    if (error) { toast(/code_invalide/.test(error.message) ? 'Code inconnu : vérifie-le auprès du responsable.' : 'Erreur : ' + error.message); return; }
+    sh.remove();
+    await loadTeams(true);
+    space = data.id; setPref('space', space); nav = []; render();
+    toast(mode === 'create' ? 'Équipe « ' + data.name + ' » créée. Invite les membres depuis « Gérer l\'équipe ».' : 'Bienvenue dans « ' + data.name + ' » !');
+    if (mode === 'create' && [...songs.values(), ...sets.values()].some(o => !o.team)) manageTeam(data.id, true);
+  };
+}
+function inviteLink(t) { return location.origin + location.pathname + '#join=' + t.code; }
+function manageTeam(id, offerTransfer) {
+  const t = teamOf(id); if (!t) return;
+  const admin = t.role === 'admin';
+  const ms = members.filter(m => m.team_id === id).sort((a, b) => (a.role === b.role ? (a.name || '').localeCompare(b.name || '') : a.role === 'admin' ? -1 : 1));
+  const sh = sheet(`<p></p>
+    ${admin ? '<small>Nom de l\'équipe</small><input class="fld tn" autocomplete="off">' : ''}
+    <small>Invitation : donne ce code ou partage le lien</small><div class="code"></div>
+    <div class="row2"><button class="alt share">Partager l'invitation</button>${admin ? '<button class="alt renew">Nouveau code</button>' : ''}</div>
+    <small>Membres (${ms.length})</small><div class="members"></div>
+    <small>Mon prénom dans l'équipe</small><input class="fld yn" autocomplete="given-name">
+    ${admin ? '<button class="alt tr">Transférer mes chants et sets perso dans l\'équipe</button>' : ''}
+    <button class="danger leave">Quitter l'équipe</button><button class="cancel">Fermer</button>`);
+  sh.querySelector('p').textContent = t.name;
+  sh.querySelector('.code').textContent = t.code;
+  if (admin) sh.querySelector('.tn').value = t.name;
+  sh.querySelector('.yn').value = (ms.find(m => m.user_id === user.id) || {}).name || '';
+  sh.querySelector('.members').innerHTML = ms.map(m => `<div class="mem"><span><b>${esc(m.name || 'Sans nom')}${m.user_id === user.id ? ' (toi)' : ''}</b><em>${m.role === 'admin' ? 'Responsable' : 'Musicien'}</em></span>${admin && m.user_id !== user.id ? `<button class="alt role" data-u="${m.user_id}" data-r="${m.role === 'admin' ? 'member' : 'admin'}">${m.role === 'admin' ? 'Passer musicien' : 'Passer responsable'}</button><button class="alt kick" data-u="${m.user_id}">Retirer</button>` : ''}</div>`).join('');
+  if (admin) sh.querySelector('.tn').addEventListener('change', async e => {
+    const { error } = await sb.from('teams').update({ name: clean(e.target.value) || t.name }).eq('id', id);
+    if (error) toast('Erreur : ' + error.message); else { await loadTeams(); sh.querySelector('p').textContent = clean(e.target.value); }
+  });
+  sh.querySelector('.yn').addEventListener('change', async e => {
+    const name = clean(e.target.value); if (!name) return;
+    setPref('myname', name);
+    const { error } = await sb.rpc('set_my_name', { p_team: id, p_name: name });
+    if (error) toast('Erreur : ' + error.message); else loadTeams();
+  });
+  sh.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.classList.contains('share')) {
+      const text = `Rejoins l'équipe « ${t.name} » sur l'app Sets : ouvre ce lien (ou entre le code ${t.code} dans « Rejoindre une équipe »).`;
+      if (navigator.share) navigator.share({ title: 'Invitation', text, url: inviteLink(t) }).catch(() => {});
+      else { try { await navigator.clipboard.writeText(text + ' ' + inviteLink(t)); toast('Invitation copiée'); } catch (er) { toast(inviteLink(t)); } }
+    } else if (b.classList.contains('renew')) {
+      const { data, error } = await sb.rpc('renew_team_code', { p_team: id });
+      if (error) toast('Erreur : ' + error.message); else { sh.querySelector('.code').textContent = data; await loadTeams(); toast('Nouveau code : l\'ancien ne marche plus.'); }
+    } else if (b.classList.contains('role')) {
+      const { error } = await sb.rpc('set_member_role', { p_team: id, p_user: b.dataset.u, p_role: b.dataset.r });
+      if (error) toast(/dernier_responsable/.test(error.message) ? 'Il faut au moins un responsable.' : 'Erreur : ' + error.message);
+      else { sh.remove(); await loadTeams(); manageTeam(id); }
+    } else if (b.classList.contains('kick')) {
+      ask('Retirer ce membre de l\'équipe ?', async () => {
+        const { error } = await sb.from('team_members').delete().eq('team_id', id).eq('user_id', b.dataset.u);
+        if (error) toast('Erreur : ' + error.message); else { sh.remove(); await loadTeams(); manageTeam(id); }
+      });
+    } else if (b.classList.contains('tr')) {
+      sh.remove(); transferToTeam(id);
+    } else if (b.classList.contains('leave')) {
+      const admins = ms.filter(m => m.role === 'admin').length;
+      if (admin && admins <= 1 && ms.length > 1) { toast('Nomme d\'abord un autre responsable avant de quitter l\'équipe.'); return; }
+      ask('Quitter l\'équipe « ' + t.name + ' » ? Ses chants et sets disparaîtront de tes appareils.', async () => {
+        const { error } = await sb.from('team_members').delete().eq('team_id', id).eq('user_id', user.id);
+        if (error) { toast('Erreur : ' + error.message); return; }
+        sh.remove(); space = ''; setPref('space', ''); await loadTeams(); nav = []; render();
+      });
+    }
+  });
+  if (offerTransfer) setTimeout(() => ask('Transférer tes chants et sets perso dans l\'équipe « ' + t.name + ' » ? Toute l\'équipe pourra les voir.', () => transferToTeam(id)), 300);
+}
+// La fenêtre de confirmation « ask » dit « Supprimer » : on en fait une variante neutre ici
+function transferToTeam(id) {
+  let n = 0;
+  for (const kind of ['song', 'set', 'item', 'rec']) for (const o of MEM[kind].values()) if (!o.team) { o.team = id; edit(kind, o, {}); n++; }
+  space = id; setPref('space', space); nav = []; render();
+  toast(n ? 'Chants et sets transférés dans l\'équipe.' : 'Rien à transférer.');
+}
+// Lien d'invitation : https://…/Notes/#join=CODE
+function readJoinLink() {
+  const code = (location.hash.match(/join=([A-Za-z0-9]{4,12})/) || [])[1];
+  if (code) { setPref('pendingJoin', code.toUpperCase()); history.replaceState(null, '', location.pathname + location.search); }
+  return !!code;
+}
+readJoinLink();
+addEventListener('hashchange', () => { if (readJoinLink()) checkPendingJoin(); });
+function checkPendingJoin() {
+  const code = pref('pendingJoin', ''); if (!code) return;
+  if (!user) { toast('Connecte-toi (bouton nuage) pour rejoindre l\'équipe.'); return; }
+  setPref('pendingJoin', '');
+  if (!teams.some(t => t.code === code)) teamForm('join', code);
+}
+
+// ---------- Données dérivées ----------
+const itemsOf = setId => [...items.values()].filter(i => i.setId === setId).sort((a, b) => (a.pos - b.pos) || a.id.localeCompare(b.id));
+const recsOf = parentId => [...recDocs.values()].filter(r => r.parentId === parentId).sort((a, b) => (a.at || 0) - (b.at || 0));
 const itemTitle = it => clean((songs.get(it.songId) || {}).title || it.title || '') || 'Chant supprimé';
 const itemKey = it => it.key || (songs.get(it.songId) || {}).key || '';
 const itemSt = it => it.struct || (songs.get(it.songId) || {}).struct || [];
+const pnoteOf = parentId => user ? pnotes.get('pn-' + user.id + '-' + parentId) : null;
 function setSummary(set) {
-  const n = set.items.length; let tot = 0, miss = 0;
-  for (const it of set.items) { const d = (songs.get(it.songId) || {}).dur || 0; if (d) tot += d; else miss++; }
-  return n + (n > 1 ? ' chants' : ' chant') + (tot ? ' · ~' + Math.max(1, Math.round(tot / 60)) + ' min' + (miss ? ' (+' + miss + ' sans durée)' : '') : '');
+  const its = itemsOf(set.id); let tot = 0, miss = 0;
+  for (const it of its) { const d = (songs.get(it.songId) || {}).dur || 0; if (d) tot += d; else miss++; }
+  return its.length + (its.length > 1 ? ' chants' : ' chant') + (tot ? ' · ~' + Math.max(1, Math.round(tot / 60)) + ' min' + (miss ? ' (+' + miss + ' sans durée)' : '') : '');
 }
 const STYLES = ['Louange', 'Adoration', 'Gospel', 'Pop', 'Rock', 'Ballade', 'Shuffle', 'Reggae', 'Afro', 'Zouk', 'Kompa', 'Latino', 'Hymne', 'Acoustique', 'Soul', 'Funk', 'Rapide', 'Lent'];
 function refreshStyles() {
-  const all = new Set([...STYLES, ...[...songs.values()].map(s => clean(s.style || '')).filter(Boolean)]);
-  $('#styles').innerHTML = [...all].map(v => `<option value="${esc(v)}">`).join('');
+  const s = new Set([...STYLES, ...[...songs.values()].map(x => clean(x.style || '')).filter(Boolean)]);
+  html($('#styles'), [...s].map(v => `<option value="${esc(v)}">`).join(''));
 }
-// Liste d'enregistrements d'une fiche (chant ou chant d'un set)
-function renderRecs(host, arr, onChange, suggest) {
-  host.innerHTML = '';
-  host.recChanged = () => onChange([...host.querySelectorAll('.rec')].map(c => ({ id: c.dataset.id, d: +c.dataset.d || 0, title: c.dataset.title || '' })));
-  host.recSuggest = suggest;
-  for (const r of arr || []) { host.append(chip(r.id, r.d || 0, r.title)); loadAudio(r.id); }
+async function loadDocs() {
+  for (const kind of ['song', 'set', 'item', 'rec', 'pnote']) {
+    MEM[kind].clear();
+    for (const o of await all(KIND_STORE[kind])) if (!o.deleted) MEM[kind].set(o.id, o);
+  }
+  refreshStyles();
 }
-async function loadAudio(id) {
-  if (urls[id]) return;
-  const a = await getAudio(id);
-  if (a) { urls[id] = URL.createObjectURL(a.blob); memBlob(id, a.blob); }
+// Conversion des données de l'ancienne version (une seule fois)
+async function migrateLocal() {
+  if (pref('schema', '') === '3') return;
+  const tsOf = o => o.synced != null && o.synced === o.updated ? 1 : (o.updated || Date.now());
+  const mk = (id, f, t, team = null) => ({ id, ...f, team, _ts: Object.fromEntries(Object.keys(f).map(k => [k, t])), ver: 0, dirty: t !== 1, seq: 0 });
+  for (const n of await all('notes')) {
+    if (n._ts) continue;
+    if (n.deleted) { if (n.synced) await put('notes', { id: n.id, deleted: true, dirty: true, ver: 0, _ts: {} }); else await del('notes', n.id); continue; }
+    await put('notes', mk(n.id, { title: n.title || '', html: n.html || '', text: n.text || '', recs: n.recs || 0, edited: n.updated || Date.now() }, tsOf(n)));
+  }
+  for (const s of await all('songs')) {
+    if (s._ts) continue;
+    const t = tsOf(s);
+    if (s.deleted) { if (s.synced) await put('songs', { id: s.id, deleted: true, dirty: true, ver: 0, _ts: {} }); else await del('songs', s.id); continue; }
+    for (const r of s.recs || []) await put('recs', mk(r.id, { parentId: s.id, title: r.title || '', d: r.d || 0, owner: null, at: t }, t));
+    await put('songs', mk(s.id, { title: s.title || '', artist: s.artist || '', key: s.key || '', bpm: s.bpm || '', sig: s.sig || '', dur: s.dur || 0, style: s.style || '', struct: s.struct || [], links: s.links || '', notes: s.notes || '' }, t));
+  }
+  for (const s of await all('sets')) {
+    if (s._ts) continue;
+    const t = tsOf(s);
+    if (s.deleted) { if (s.synced) await put('sets', { id: s.id, deleted: true, dirty: true, ver: 0, _ts: {} }); else await del('sets', s.id); continue; }
+    (s.items || []).forEach((it, i) => {
+      put('items', mk(it.id, { setId: s.id, songId: it.songId, title: it.title || '', key: it.key || null, struct: it.struct || null, lead: it.lead || '', note: it.note || '', pos: i }, t));
+      for (const r of it.recs || []) put('recs', mk(r.id, { parentId: it.id, title: r.title || '', d: r.d || 0, owner: null, at: t }, t));
+    });
+    await put('sets', mk(s.id, { name: s.name || '', date: s.date || '', notes: s.notes || '' }, t));
+  }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('pull:')) localStorage.removeItem(k); } catch (e) {}
+  setPref('schema', '3');
+}
+
+// ---------- Rafraîchissement de l'écran après une modification reçue ----------
+function refreshUI(force) {
+  const kinds = new Set(changedKinds); changedKinds.clear();
+  if (!force && !kinds.size) return;
+  if ([...kinds].some(k => k === 'song')) refreshStyles();
+  const t = topNav();
+  if (!t) {
+    if ($('#list').classList.contains('hidden')) return;
+    if (force || (tab === 'notes' ? kinds.has('note') : [...kinds].some(k => k !== 'note' && k !== 'pnote'))) renderTab();
+    return;
+  }
+  if (t.v === 'editor') return;
+  render();
 }
 
 // ---------- Navigation entre écrans ----------
@@ -845,35 +1147,35 @@ async function goBack() {
   if (rec) await stopRec();
   await flush();
   const t = nav.pop();
-  if (t && t.v === 'song') { const s = songs.get(t.id); if (s && !clean(s.title || '') && !s.artist && !s.key && !(s.struct || []).length && !(s.recs || []).length && !s.notes && !s.links && ![...sets.values()].some(x => x.items.some(i => i.songId === s.id))) await removeDoc('songs', s); }
-  if (t && t.v === 'set') { const s = sets.get(t.id); if (s && !clean(s.name || '') && !s.items.length && !s.notes) await removeDoc('sets', s); }
+  if (t && t.v === 'song') { const s = songs.get(t.id); if (s && !s.ver && !clean(s.title || '') && !s.artist && !s.key && !(s.struct || []).length && !recsOf(s.id).length && !s.notes && !s.links && ![...items.values()].some(i => i.songId === s.id)) remove('song', s); }
+  if (t && t.v === 'set') { const s = sets.get(t.id); if (s && !s.ver && !clean(s.name || '') && !itemsOf(s.id).length && !s.notes) remove('set', s); }
   render();
 }
 document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', goBack));
 function render(fresh) {
   const t = topNav();
-  if (!t) { showView('list'); editTouched.clear(); renderTab(); return; }
+  if (!t) { showView('list'); renderTab(); return; }
+  const doc = t.v === 'song' ? songs.get(t.id) : sets.get(t.id);
+  if (!doc) { nav.pop(); toast('Cet élément a été supprimé.'); return render(); }
   showView(t.v);
   const prev = nav[nav.length - 2];
   $('#' + t.v + ' [data-back] span').textContent = !prev ? { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab] : { set: 'Set', song: 'Chant', item: 'Retour' }[prev.v];
+  const ed = canEdit(doc.team);
+  $('#' + t.v).classList.toggle('ro', !ed);
+  $('#' + t.v).querySelectorAll('.form input, .form textarea, .form select, .form .fld').forEach(e => { if (!e.closest('.mine')) e.disabled = !ed; });
   ({ song: renderSong, set: renderSet, item: renderItem })[t.v](t);
-  if (fresh || t.scroll != null) $('#' + t.v + ' .scroller').scrollTop = fresh ? 0 : t.scroll;
-}
-// Après une synchro : on rafraîchit l'écran affiché (sauf s'il est en cours d'édition)
-function refreshAfterSync() {
-  const t = topNav();
-  if (!t) { if (!$('#list').classList.contains('hidden')) renderTab(); return; }
-  if (!changedIds.has(t.id) && t.v === 'song') return;
-  if (!(t.v === 'song' ? songs : sets).has(t.id)) { nav.pop(); render(); return; }
-  t.scroll = $('#' + t.v + ' .scroller').scrollTop; render();
+  if (fresh) $('#' + t.v + ' .scroller').scrollTop = 0;
 }
 
 // ---------- Accueil : onglets ----------
 function renderTab() {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#h1').textContent = { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab];
+  $('#space').classList.toggle('hidden', tab === 'notes' || (!teams.length && !space));
+  $('#space span').textContent = spaceName(space);
   $('#q').placeholder = { sets: 'Rechercher un set ou un chant', songs: 'Rechercher un chant, un auteur, un style', notes: 'Rechercher' }[tab];
   $('#new').setAttribute('aria-label', { sets: 'Nouveau set', songs: 'Nouveau chant', notes: 'Nouvelle note' }[tab]);
+  $('#new').classList.toggle('hidden', tab !== 'notes' && !canEdit(space || null));
   $('#grid').classList.toggle('rows', tab !== 'notes');
   return tab === 'notes' ? renderNotes() : tab === 'songs' ? renderSongs() : renderSets();
 }
@@ -881,11 +1183,13 @@ $('.tabs').addEventListener('click', e => {
   const b = e.target.closest('[data-tab]'); if (!b) return;
   tab = b.dataset.tab; setPref('tab', tab); $('#q').value = ''; renderTab(); $('#grid').scrollTop = 0;
 });
-$('#new').onclick = async () => {
+$('#space').onclick = spaceSheet;
+$('#new').onclick = () => {
   if (tab === 'notes') return newNote();
-  if (tab === 'songs') { const s = newSong(''); await put('songs', s); return go('song', { id: s.id, focus: true }); }
-  const s = { id: uid(), name: '', date: todayISO(), items: [], notes: '', updated: Date.now() };
-  sets.set(s.id, s); await put('sets', s); go('set', { id: s.id, focus: true });
+  const team = space || null;
+  if (tab === 'songs') { const s = create('song', { title: '', artist: '', key: '', bpm: '', sig: '', dur: 0, style: '', struct: [], links: '', notes: '' }, team); return go('song', { id: s.id, focus: true }); }
+  const s = create('set', { name: '', date: todayISO(), notes: '' }, team);
+  go('set', { id: s.id, focus: true });
 };
 $('#grid').addEventListener('click', e => {
   const so = e.target.closest('[data-song]'); if (so) return go('song', { id: so.dataset.song });
@@ -894,174 +1198,245 @@ $('#grid').addEventListener('click', e => {
 const cmpTitle = (a, b) => clean(a.title || '').localeCompare(clean(b.title || ''), 'fr', { sensitivity: 'base' });
 function renderSongs() {
   const q = $('#q').value.trim().toLowerCase();
-  const list = [...songs.values()].sort(cmpTitle).filter(s => !q || [s.title, s.artist, s.style].join(' ').toLowerCase().includes(q));
-  $('#count').textContent = songs.size + (songs.size > 1 ? ' chants' : ' chant');
-  $('#grid').innerHTML = list.length ? list.map(s => `<button class="songc" data-song="${esc(s.id)}"><span class="l1"><b>${esc(clean(s.title || '') || 'Sans titre')}</b>${s.key ? `<span class="key">${esc(keyLabel(s.key))}</span>` : ''}</span><span class="meta">${esc([s.artist, s.bpm && s.bpm + ' BPM', s.sig, s.style].filter(Boolean).join(' · ') || '—')}</span>${pillsHTML(s.struct, true)}</button>`).join('')
-    : `<div class="empty">${q ? 'Aucun résultat' : 'Aucun chant.<br>Touchez + pour créer la première fiche.'}</div>`;
+  const mine = [...songs.values()].filter(inSpace);
+  const list = mine.sort(cmpTitle).filter(s => !q || [s.title, s.artist, s.style].join(' ').toLowerCase().includes(q));
+  $('#count').textContent = mine.length + (mine.length > 1 ? ' chants' : ' chant');
+  html($('#grid'), list.length ? list.map(s => `<button class="songc" data-song="${esc(s.id)}"><span class="l1"><b>${esc(clean(s.title || '') || 'Sans titre')}</b>${s.key ? `<span class="key">${esc(keyLabel(s.key))}</span>` : ''}</span><span class="meta">${esc([s.artist, s.bpm && s.bpm + ' BPM', s.sig, s.style].filter(Boolean).join(' · ') || '—')}</span>${pillsHTML(s.struct, true)}</button>`).join('')
+    : `<div class="empty">${q ? 'Aucun résultat' : canEdit(space || null) ? 'Aucun chant.<br>Touchez + pour créer la première fiche.' : 'Aucun chant dans l\'équipe pour l\'instant.'}</div>`);
 }
 function renderSets() {
   const q = $('#q').value.trim().toLowerCase(), today = todayISO();
-  const list = [...sets.values()].filter(s => !q || [s.name, ...s.items.map(itemTitle)].join(' ').toLowerCase().includes(q));
+  const mine = [...sets.values()].filter(inSpace);
+  const list = mine.filter(s => !q || [s.name, ...itemsOf(s.id).map(itemTitle)].join(' ').toLowerCase().includes(q));
   const up = list.filter(s => (s.date || '9999') >= today).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const past = list.filter(s => (s.date || '9999') < today).sort((a, b) => b.date.localeCompare(a.date));
-  $('#count').textContent = sets.size + (sets.size > 1 ? ' sets' : ' set');
+  $('#count').textContent = mine.length + (mine.length > 1 ? ' sets' : ' set');
   const card = (s, p) => {
     const d = dParse(s.date);
-    return `<button class="setc${p ? ' past' : ''}" data-set="${esc(s.id)}"><span class="dt">${d ? `<small>${d.toLocaleDateString('fr-FR', { weekday: 'short' })}</small><b>${d.getDate()}</b><small>${d.toLocaleDateString('fr-FR', { month: 'short' })}</small>` : '<b>—</b>'}</span><span class="bd"><b>${esc(clean(s.name || '') || 'Set sans nom')}</b><span>${esc(setSummary(s))}</span><span>${esc(s.items.map(itemTitle).join(' · ') || 'Aucun chant')}</span></span></button>`;
+    return `<button class="setc${p ? ' past' : ''}" data-set="${esc(s.id)}"><span class="dt">${d ? `<small>${d.toLocaleDateString('fr-FR', { weekday: 'short' })}</small><b>${d.getDate()}</b><small>${d.toLocaleDateString('fr-FR', { month: 'short' })}</small>` : '<b>—</b>'}</span><span class="bd"><b>${esc(clean(s.name || '') || 'Set sans nom')}</b><span>${esc(setSummary(s))}</span><span>${esc(itemsOf(s.id).map(itemTitle).join(' · ') || 'Aucun chant')}</span></span></button>`;
   };
-  $('#grid').innerHTML = (up.length ? '<h4>À venir</h4>' + up.map(s => card(s)).join('') : '') + (past.length ? '<h4>Passés</h4>' + past.map(s => card(s, true)).join('') : '')
-    || `<div class="empty">${q ? 'Aucun résultat' : 'Aucun set.<br>Touchez + pour préparer le premier.'}</div>`;
+  html($('#grid'), (up.length ? '<h4>À venir</h4>' + up.map(s => card(s)).join('') : '') + (past.length ? '<h4>Passés</h4>' + past.map(s => card(s, true)).join('') : '')
+    || `<div class="empty">${q ? 'Aucun résultat' : canEdit(space || null) ? 'Aucun set.<br>Touchez + pour préparer le premier.' : 'Aucun set dans l\'équipe pour l\'instant.'}</div>`);
 }
 
-// Écrit une valeur dans un champ seulement si elle a changé (le curseur ne saute pas pendant la saisie)
-function setV(sel, v) { const e = $(sel); v = v == null ? '' : String(v); if (e.value !== v) e.value = v; }
+// ---------- Enregistrements d'une fiche (chant ou chant d'un set) ----------
+// Chaque enregistrement est un document à part : chacun peut ajouter les siens.
+function renderRecs(host, parentId, suggest) {
+  const list = recsOf(parentId);
+  const ro = r => !(user && (r.owner === user.id || (!r.owner && !r.team))) && !canEdit(r.team) && r.team;
+  const sig = list.map(r => [r.id, r.title, r.d, ro(r) ? 1 : 0].join('|')).join('/');
+  host.recSuggest = suggest;
+  if (host.__sig === sig) return;
+  host.__sig = sig;
+  const keep = {}; host.querySelectorAll('.rec').forEach(c => { keep[c.dataset.id] = c; });
+  host.innerHTML = '';
+  for (const r of list) {
+    let c = keep[r.id];
+    if (!c) { c = chip(r.id, r.d || 0, r.title); loadAudio(r.id); }
+    else setTitle(c, r.title);
+    c.classList.toggle('ro', !!ro(r));
+    const by = r.team && r.owner && r.owner !== (user && user.id) ? memberName(r.team, r.owner) : '';
+    c.title = by ? 'Enregistré par ' + by : '';
+    host.append(c);
+  }
+}
+async function loadAudio(id) {
+  if (urls[id]) return;
+  const a = await getAudio(id);
+  if (a) { urls[id] = URL.createObjectURL(a.blob); memBlob(id, a.blob); }
+}
+// Renommer / supprimer depuis un lecteur d'une fiche
+function recOp(c, op, title) {
+  const r = recDocs.get(c.dataset.id); if (!r) return;
+  if (op === 'rename') edit('rec', r, { title: clean(title) });
+  else remove('rec', r);
+  refreshUI(true);
+}
+function newRec(parentId, team, title) {
+  return (id, d, t) => {
+    const r = { id, parentId, title: t, d, owner: user ? user.id : null, at: now() };
+    const o = { ...r, team: team || null, _ts: {}, ver: 0, dirty: true, seq: 1 };
+    const ts = now(); for (const k in r) if (k !== 'id') o._ts[k] = ts;
+    if (o.team && user) { o._by = user.id; o._ts._by = ts; }
+    recDocs.set(id, o); storeLocal('rec', o);
+    refreshUI(true);
+  };
+}
+// Notes perso (visibles par moi seul) sur un chant ou un chant d'un set d'équipe
+function bindPnote(sel, parentOf) {
+  $(sel).addEventListener('input', () => {
+    const p = parentOf(); if (!p || !user) return;
+    const id = 'pn-' + user.id + '-' + p.id;
+    let o = pnotes.get(id);
+    if (!o) { o = { id, parentId: p.id, text: '', team: null, _ts: {}, ver: 0, seq: 0 }; pnotes.set(id, o); }
+    edit('pnote', o, { text: $(sel).value });
+  });
+}
+function drawPnote(wrap, sel, parent) {
+  const show = !!(user && parent && parent.team);
+  $(wrap).classList.toggle('hidden', !show);
+  if (show) setV(sel, (pnoteOf(parent.id) || {}).text || '');
+}
 
 // ---------- Fiche d'un chant ----------
 const curSong = () => { const t = topNav(); return t && t.v === 'song' ? songs.get(t.id) : null; };
+const songSuggest = s => () => [clean(s.title || ''), clean(s.title || '') + (s.key ? ' – ' + keyLabel(s.key) : ''), clean(s.title || '') + ' – répétition', clean(s.title || '') + ' – voix guide'];
 function renderSong(t) {
-  const s = songs.get(t.id); if (!s) { nav.pop(); return render(); }
+  const s = songs.get(t.id);
   setV('#s-title', s.title || ''); setV('#s-artist', s.artist || '');
   $('#s-key').textContent = s.key ? keyLabel(s.key) : '—';
   setV('#s-bpm', s.bpm || ''); setV('#s-sig', s.sig || ''); setV('#s-dur', s.dur ? fmt(s.dur) : '');
   setV('#s-style', s.style || ''); setV('#s-links', s.links || ''); setV('#s-notes', s.notes || '');
+  $('#s-mod').textContent = modLine(s);
   drawLinks(s); songSt.draw();
-  renderRecs($('#s-recs'), s.recs, arr => { s.recs = arr; touch('songs', s); },
-    () => [clean(s.title || ''), clean(s.title || '') + (s.key ? ' – ' + keyLabel(s.key) : ''), clean(s.title || '') + ' – répétition', clean(s.title || '') + ' – voix guide']);
-  const used = [...sets.values()].filter(x => x.items.some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  $('#s-used').innerHTML = used.length ? used.map(x => `<button data-goset="${esc(x.id)}">${esc((dShort(x.date) ? dShort(x.date) + ' · ' : '') + (clean(x.name || '') || 'Set sans nom'))} ›</button>`).join('') : '<span>Dans aucun set pour l\'instant.</span>';
+  renderRecs($('#s-recs'), s.id, songSuggest(s));
+  drawPnote('#s-mine', '#s-pnote', s);
+  const used = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  html($('#s-used'), used.length ? used.map(x => `<button data-goset="${esc(x.id)}">${esc((dShort(x.date) ? dShort(x.date) + ' · ' : '') + (clean(x.name || '') || 'Set sans nom'))} ›</button>`).join('') : '<span>Dans aucun set pour l\'instant.</span>');
   if (t.focus) { t.focus = false; setTimeout(() => $('#s-title').focus(), 60); }
 }
 function drawLinks(s) {
-  $('#s-linkview').innerHTML = (s.links || '').split(/\s+/).filter(u => /^https?:\/\/\S+$/i.test(u))
-    .map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/i, ''))}</a>`).join('');
+  html($('#s-linkview'), (s.links || '').split(/\s+/).filter(u => /^https?:\/\/\S+$/i.test(u))
+    .map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\/(www\.)?/i, ''))}</a>`).join(''));
 }
 function bindSong(sel, f, ev = 'input') {
-  $(sel).addEventListener(ev, () => { const s = curSong(); if (!s) return; f(s, $(sel).value); touch('songs', s); });
+  $(sel).addEventListener(ev, () => { const s = curSong(); if (!s) return; edit('song', s, f(s, $(sel).value)); });
 }
-bindSong('#s-title', (s, v) => { s.title = v; });
-bindSong('#s-artist', (s, v) => { s.artist = v; });
-bindSong('#s-bpm', (s, v) => { s.bpm = v.replace(/\D/g, '').slice(0, 3); });
-bindSong('#s-sig', (s, v) => { s.sig = v; }, 'change');
-bindSong('#s-dur', (s, v) => { s.dur = parseDur(v); $('#s-dur').value = s.dur ? fmt(s.dur) : ''; }, 'change');
-bindSong('#s-style', (s, v) => { s.style = v; });
+bindSong('#s-title', (s, v) => ({ title: v }));
+bindSong('#s-artist', (s, v) => ({ artist: v }));
+bindSong('#s-bpm', (s, v) => ({ bpm: v.replace(/\D/g, '').slice(0, 3) }));
+bindSong('#s-sig', (s, v) => ({ sig: v }), 'change');
+bindSong('#s-dur', (s, v) => { const d = parseDur(v); $('#s-dur').value = d ? fmt(d) : ''; return { dur: d }; }, 'change');
+bindSong('#s-style', (s, v) => ({ style: v }));
 $('#s-style').addEventListener('change', refreshStyles);
-bindSong('#s-links', (s, v) => { s.links = v; drawLinks(s); });
-bindSong('#s-notes', (s, v) => { s.notes = v; });
+bindSong('#s-links', (s, v) => { setTimeout(() => drawLinks(s)); return { links: v }; });
+bindSong('#s-notes', (s, v) => ({ notes: v }));
+bindPnote('#s-pnote', curSong);
 $('#s-key').onclick = () => {
-  const s = curSong(); if (!s) return;
-  keySheet(s.key, k => { s.key = k || ''; touch('songs', s); $('#s-key').textContent = k ? keyLabel(k) : '—'; });
+  const s = curSong(); if (!s || !canEdit(s.team)) return;
+  keySheet(s.key, k => { edit('song', s, { key: k || '' }); $('#s-key').textContent = k ? keyLabel(k) : '—'; });
 };
-const songSt = structEditor($('#s-struct'), () => (curSong() || {}).struct || [], st => { const s = curSong(); if (!s) return; s.struct = st; touch('songs', s); });
+const songSt = structEditor($('#s-struct'), () => (curSong() || {}).struct || [], st => { const s = curSong(); if (s) edit('song', s, { struct: st }); });
 $('#s-rec').onclick = () => {
   if (rec) return stopRec();
   const s = curSong(); if (!s) return;
-  recToggle(clean(s.title || '') ? clean(s.title) + (s.key ? ' – ' + keyLabel(s.key) : '') : 'Enregistrement', (id, d, title) => {
-    s.recs = [...(s.recs || []), { id, d, title }]; touch('songs', s);
-    if (curSong() === s) renderRecs($('#s-recs'), s.recs, arr => { s.recs = arr; touch('songs', s); }, $('#s-recs').recSuggest);
-  });
+  recToggle(clean(s.title || '') ? clean(s.title) + (s.key ? ' – ' + keyLabel(s.key) : '') : 'Enregistrement', newRec(s.id, s.team));
 };
 $('#s-used').addEventListener('click', e => { const b = e.target.closest('[data-goset]'); if (b) go('set', { id: b.dataset.goset }); });
 $('#s-del').onclick = () => {
   const s = curSong(); if (!s) return;
-  const n = [...sets.values()].filter(x => x.items.some(i => i.songId === s.id)).length;
+  const n = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).length;
   ask('Supprimer ce chant de la bibliothèque ?' + (n ? ` Il est utilisé dans ${n} set${n > 1 ? 's' : ''} (son titre y restera).` : ''), async () => {
     if (rec) await stopRec();
-    await removeDoc('songs', s); nav.pop(); render();
+    for (const r of recsOf(s.id)) remove('rec', r);
+    remove('song', s); nav.pop(); render();
   });
 };
 
 // ---------- Un set ----------
 const curSet = () => { const t = topNav(); return t && (t.v === 'set' || t.v === 'item') ? sets.get(t.id) : null; };
 function renderSet(t) {
-  const s = sets.get(t.id); if (!s) { nav.pop(); return render(); }
+  const s = sets.get(t.id);
   setV('#set-name', s.name || ''); setV('#set-date', s.date || ''); setV('#set-notes', s.notes || '');
+  $('#set-mod').textContent = modLine(s);
   drawItems(s);
   if (t.focus) { t.focus = false; setTimeout(() => $('#set-name').focus(), 60); }
 }
 const ARROW = d => `<svg viewBox="0 0 24 24"><path d="${d ? 'm6 9 6 6 6-6' : 'm6 15 6-6 6 6'}"/></svg>`;
 function drawItems(s) {
   $('#set-sum').textContent = setSummary(s);
-  $('#set-items').innerHTML = s.items.map((it, i) => {
+  const ed = canEdit(s.team);
+  html($('#set-items'), itemsOf(s.id).map((it, i) => {
     const song = songs.get(it.songId), k = itemKey(it), changed = it.key && song && song.key && it.key !== song.key;
-    const meta = [song && song.bpm && song.bpm + ' BPM', song && song.style, it.lead && 'Lead : ' + it.lead, it.recs && it.recs.length && '🎙 ' + it.recs.length].filter(Boolean).join(' · ');
-    return `<div class="itc" data-it="${esc(it.id)}"><span class="num">${i + 1}</span><button class="main" type="button"><span class="l1"><b>${esc(itemTitle(it))}</b>${k ? `<span class="key">${esc(keyLabel(k))}${changed ? `<s>orig. ${esc(keyLabel(song.key))}</s>` : ''}</span>` : ''}</span>${meta ? `<span class="meta">${esc(meta)}</span>` : ''}${pillsHTML(itemSt(it), true)}${it.note ? `<span class="note">↳ ${esc(it.note)}</span>` : ''}</button><span class="mv"><button type="button" data-mv="-1" aria-label="Monter">${ARROW(0)}</button><button type="button" data-mv="1" aria-label="Descendre">${ARROW(1)}</button></span></div>`;
-  }).join('') || '<p class="empty-st">Aucun chant pour l\'instant.</p>';
+    const n = recsOf(it.id).length;
+    const meta = [song && song.bpm && song.bpm + ' BPM', song && song.style, it.lead && 'Lead : ' + it.lead, n && '🎙 ' + n].filter(Boolean).join(' · ');
+    return `<div class="itc" data-it="${esc(it.id)}"><span class="num">${i + 1}</span><button class="main" type="button"><span class="l1"><b>${esc(itemTitle(it))}</b>${k ? `<span class="key">${esc(keyLabel(k))}${changed ? `<s>orig. ${esc(keyLabel(song.key))}</s>` : ''}</span>` : ''}</span>${meta ? `<span class="meta">${esc(meta)}</span>` : ''}${pillsHTML(itemSt(it), true)}${it.note ? `<span class="note">↳ ${esc(it.note)}</span>` : ''}</button>${ed ? `<span class="mv"><button type="button" data-mv="-1" aria-label="Monter">${ARROW(0)}</button><button type="button" data-mv="1" aria-label="Descendre">${ARROW(1)}</button></span>` : ''}</div>`;
+  }).join('') || '<p class="empty-st">Aucun chant pour l\'instant.</p>');
+}
+// Déplacer un chant : on change seulement SA position (entre ses nouveaux voisins), ce qui
+// n'entre pas en conflit avec les modifications faites par d'autres sur le même set.
+function moveItem(s, id, dir) {
+  let list = itemsOf(s.id);
+  if (list.some((x, i) => i && x.pos === list[i - 1].pos)) { list.forEach((x, i) => edit('item', x, { pos: i })); list = itemsOf(s.id); }
+  const i = list.findIndex(x => x.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const a = list[j], b = list[j + dir];
+  edit('item', list[i], { pos: b ? (a.pos + b.pos) / 2 : a.pos + dir });
+  drawItems(s);
 }
 $('#set-items').addEventListener('click', e => {
   const card = e.target.closest('.itc'), s = curSet(); if (!card || !s) return;
-  const i = s.items.findIndex(x => x.id === card.dataset.it);
   const mv = e.target.closest('[data-mv]');
-  if (mv) {
-    const j = i + +mv.dataset.mv; if (j < 0 || j >= s.items.length) return;
-    [s.items[i], s.items[j]] = [s.items[j], s.items[i]]; touch('sets', s); drawItems(s); return;
-  }
+  if (mv) { if (canEdit(s.team)) moveItem(s, card.dataset.it, +mv.dataset.mv); return; }
   go('item', { id: s.id, item: card.dataset.it });
 });
 function bindSet(sel, f, ev = 'input') {
-  $(sel).addEventListener(ev, () => { const s = curSet(); if (!s) return; f(s, $(sel).value); touch('sets', s); });
+  $(sel).addEventListener(ev, () => { const s = curSet(); if (!s) return; edit('set', s, f($(sel).value)); });
 }
-bindSet('#set-name', (s, v) => { s.name = v; });
-bindSet('#set-date', (s, v) => { s.date = v; }, 'change');
-bindSet('#set-notes', (s, v) => { s.notes = v; });
-$('#set-add').onclick = () => { const s = curSet(); if (s) songPicker(s); };
+bindSet('#set-name', v => ({ name: v }));
+bindSet('#set-date', v => ({ date: v }), 'change');
+bindSet('#set-notes', v => ({ notes: v }));
+$('#set-add').onclick = () => { const s = curSet(); if (s && canEdit(s.team)) songPicker(s); };
 function songPicker(set) {
   const sh = sheet('<p>Ajouter un chant</p><input class="fld pq" placeholder="Rechercher ou taper un nouveau titre…" autocomplete="off"><div class="pick"></div><button class="cancel">Fermer</button>');
   const q = sh.querySelector('.pq'), box = sh.querySelector('.pick');
   const draw = () => {
-    const v = clean(q.value).toLowerCase(), inSet = new Set(set.items.map(i => i.songId));
-    const list = [...songs.values()].filter(s => clean(s.title || '') && (!v || [s.title, s.artist].join(' ').toLowerCase().includes(v))).sort(cmpTitle);
+    const v = clean(q.value).toLowerCase(), inSet = new Set(itemsOf(set.id).map(i => i.songId));
+    const list = [...songs.values()].filter(s => (s.team || '') === (set.team || '') && clean(s.title || '') && (!v || [s.title, s.artist].join(' ').toLowerCase().includes(v))).sort(cmpTitle);
     box.innerHTML = (v && !list.some(s => clean(s.title).toLowerCase() === v) ? `<button class="create">+ Créer le chant « ${esc(clean(q.value))} »</button>` : '')
       + list.map(s => `<button data-pick="${esc(s.id)}"><b>${esc(clean(s.title))}</b>${inSet.has(s.id) ? '<em class="in">déjà dans le set</em>' : ''}${s.key ? `<span class="key">${esc(keyLabel(s.key))}</span>` : ''}</button>`).join('')
       || `<p class="empty-st">${v ? '' : 'Ta bibliothèque est vide : tape un titre pour créer un chant.'}</p>`;
   };
   q.addEventListener('input', draw); draw();
   q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const b = box.querySelector('button'); if (b) b.click(); } });
-  box.addEventListener('click', async e => {
+  box.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     let song;
-    if (b.classList.contains('create')) { song = newSong(clean(q.value)); await put('songs', song); }
+    if (b.classList.contains('create')) song = create('song', { title: clean(q.value), artist: '', key: '', bpm: '', sig: '', dur: 0, style: '', struct: [], links: '', notes: '' }, set.team);
     else song = songs.get(b.dataset.pick);
     if (!song) return;
-    set.items.push({ id: uid(), songId: song.id, title: clean(song.title), key: null, struct: null, lead: '', note: '', recs: [] });
-    touch('sets', set); drawItems(set);
+    const list = itemsOf(set.id);
+    create('item', { setId: set.id, songId: song.id, title: clean(song.title), key: null, struct: null, lead: '', note: '', pos: list.length ? list[list.length - 1].pos + 1 : 0 }, set.team);
+    drawItems(set);
     toast('« ' + clean(song.title) + ' » ajouté au set');
     q.value = ''; draw();
   });
 }
 $('#set-dup').onclick = async () => {
-  const s = curSet(); if (!s) return;
-  await flush();
-  const c = JSON.parse(JSON.stringify(s));
-  delete c.synced; delete c.deleted;
-  Object.assign(c, { id: uid(), name: (clean(s.name || '') || 'Set') + ' (copie)', date: todayISO(), updated: Date.now() });
-  c.items = c.items.map(it => ({ ...it, id: uid(), recs: [] }));
-  sets.set(c.id, c); await put('sets', c); syncSoon();
+  const s = curSet(); if (!s || !canEdit(s.team)) return;
+  const c = create('set', { name: (clean(s.name || '') || 'Set') + ' (copie)', date: todayISO(), notes: s.notes || '' }, s.team);
+  for (const it of itemsOf(s.id)) create('item', { setId: c.id, songId: it.songId, title: it.title, key: it.key || null, struct: it.struct || null, lead: it.lead || '', note: it.note || '', pos: it.pos }, s.team);
   nav.pop(); nav.push({ v: 'set', id: c.id }); render(true);
   toast('Set dupliqué (sans les enregistrements)');
 };
 $('#set-del').onclick = () => {
   const s = curSet(); if (!s) return;
-  ask('Supprimer ce set ? Ses enregistrements seront supprimés aussi.', async () => { await removeDoc('sets', s); nav.pop(); render(); });
+  ask('Supprimer ce set ? Ses enregistrements seront supprimés aussi.', () => {
+    for (const it of itemsOf(s.id)) { for (const r of recsOf(it.id)) remove('rec', r); remove('item', it); }
+    remove('set', s); nav.pop(); render();
+  });
 };
 
 // ---------- Un chant dans un set (réglages du jour) ----------
 const curItem = () => {
   const t = topNav(); if (!t || t.v !== 'item') return null;
-  const set = sets.get(t.id), it = set && set.items.find(i => i.id === t.item);
-  return it ? { set, it, song: songs.get(it.songId) } : null;
+  const set = sets.get(t.id), it = items.get(t.item);
+  return set && it && !it.deleted ? { set, it, song: songs.get(it.songId) } : null;
 };
 function renderItem() {
   const c = curItem(); if (!c) { nav.pop(); return render(); }
   const { set, it, song } = c;
-  $('#it-num').textContent = set.items.indexOf(it) + 1;
+  $('#it-num').textContent = itemsOf(set.id).indexOf(it) + 1;
   $('#it-title').textContent = itemTitle(it);
   $('#it-open').classList.toggle('hidden', !song);
   $('#it-info').textContent = song ? [song.key && 'Tonalité d\'origine : ' + keyLabel(song.key), song.bpm && song.bpm + ' BPM', song.sig, song.style].filter(Boolean).join(' · ') : 'Ce chant a été supprimé de la bibliothèque.';
+  $('#it-mod').textContent = modLine(it);
   drawItemKey(c);
   setV('#it-lead', it.lead || ''); setV('#it-note', it.note || '');
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
-  renderRecs($('#it-recs'), it.recs, arr => { it.recs = arr; touch('sets', set); }, () => itemRecTitles(c));
+  renderRecs($('#it-recs'), it.id, () => itemRecTitles(c));
+  drawPnote('#it-mine', '#it-pnote', it);
 }
 function drawItemKey({ it, song }) {
   $('#it-key').textContent = it.key ? keyLabel(it.key) + (song && song.key && song.key !== it.key ? ' (orig. ' + keyLabel(song.key) + ')' : '') : song && song.key ? keyLabel(song.key) : '—';
@@ -1071,36 +1446,48 @@ function itemRecTitles({ set, it }) {
   return [[t, k, d].filter(Boolean).join(' – '), t, [t, k].filter(Boolean).join(' – '), [t, d].filter(Boolean).join(' – '), clean(set.name || '') && t + ' – ' + clean(set.name)];
 }
 const itSt = structEditor($('#it-struct'), () => { const c = curItem(); return c ? itemSt(c.it) : []; },
-  st => { const c = curItem(); if (!c) return; c.it.struct = st; touch('sets', c.set); $('#it-reset').classList.remove('hidden'); });
-$('#it-reset').onclick = () => { const c = curItem(); if (!c) return; c.it.struct = null; touch('sets', c.set); itSt.draw(); $('#it-reset').classList.add('hidden'); };
+  st => { const c = curItem(); if (!c) return; edit('item', c.it, { struct: st }); $('#it-reset').classList.remove('hidden'); });
+$('#it-reset').onclick = () => { const c = curItem(); if (!c) return; edit('item', c.it, { struct: null }); itSt.draw(); $('#it-reset').classList.add('hidden'); };
 $('#it-key').onclick = () => {
-  const c = curItem(); if (!c) return;
-  keySheet(itemKey(c.it), k => { c.it.key = k && !(c.song && k === c.song.key) ? k : null; touch('sets', c.set); drawItemKey(c); },
+  const c = curItem(); if (!c || !canEdit(c.it.team)) return;
+  keySheet(itemKey(c.it), k => { edit('item', c.it, { key: k && !(c.song && k === c.song.key) ? k : null }); drawItemKey(c); },
     c.song && c.song.key ? 'Comme le chant (' + keyLabel(c.song.key) + ')' : 'Aucune');
 };
-for (const [sel, f] of [['#it-lead', (it, v) => { it.lead = v; }], ['#it-note', (it, v) => { it.note = v; }]])
-  $(sel).addEventListener('input', () => { const c = curItem(); if (!c) return; f(c.it, $(sel).value); touch('sets', c.set); });
+for (const [sel, f] of [['#it-lead', v => ({ lead: v })], ['#it-note', v => ({ note: v })]])
+  $(sel).addEventListener('input', () => { const c = curItem(); if (c) edit('item', c.it, f($(sel).value)); });
+bindPnote('#it-pnote', () => (curItem() || {}).it);
 $('#it-open').onclick = () => { const c = curItem(); if (c && c.song) go('song', { id: c.song.id }); };
 $('#it-del').onclick = () => {
   const c = curItem(); if (!c) return;
-  ask('Retirer ce chant du set ?' + ((c.it.recs || []).length ? ' Ses enregistrements seront supprimés.' : ''), async () => {
+  ask('Retirer ce chant du set ?' + (recsOf(c.it.id).length ? ' Ses enregistrements seront supprimés.' : ''), async () => {
     if (rec) await stopRec();
-    const ids = (c.it.recs || []).map(r => r.id);
-    for (const id of ids) await delAudio(id);
-    cloudRemove(ids);
-    c.set.items = c.set.items.filter(x => x !== c.it); touch('sets', c.set);
+    for (const r of recsOf(c.it.id)) remove('rec', r);
+    remove('item', c.it);
     nav.pop(); render();
   });
 };
 $('#it-rec').onclick = () => {
   if (rec) return stopRec();
   const c = curItem(); if (!c) return;
-  recToggle(itemRecTitles(c)[0], (id, d, title) => {
-    c.it.recs = [...(c.it.recs || []), { id, d, title }]; touch('sets', c.set);
-    const now = curItem();
-    if (now && now.it === c.it) renderRecs($('#it-recs'), c.it.recs, arr => { c.it.recs = arr; touch('sets', c.set); }, () => itemRecTitles(c));
-  });
+  recToggle(itemRecTitles(c)[0], newRec(c.it.id, c.it.team));
 };
+
+// ---------- Démarrage ----------
+await migrateLocal();
 await loadDocs();
 render();
+if (sb) {
+  sb.auth.onAuthStateChange((ev, session) => {
+    const was = user && user.id; user = session ? session.user : null;
+    if ((user && user.id) === was) { syncUI(); return; }
+    live();
+    if (user) { loadTeams(true).then(() => { checkPendingJoin(); }); sync(true); }
+    else { teams = []; members = []; space = ''; setPref('space', ''); refreshUI(true); }
+    syncUI();
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncSoon(100); loadTeams(); } });
+  addEventListener('online', () => syncSoon(100)); addEventListener('offline', syncUI);
+  setInterval(() => { if (!document.hidden) sync(); }, 60000);
+} else checkPendingJoin();
+syncUI();
 })();
