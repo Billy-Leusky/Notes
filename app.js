@@ -543,8 +543,16 @@ function cloudSheet() {
     b.disabled = true;
     const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }) : await sb.auth.signInWithPassword({ email, password });
     b.disabled = false;
-    if (error) { toast(/Invalid login/i.test(error.message) ? 'E-mail ou mot de passe incorrect' : /registered/i.test(error.message) ? 'Ce compte existe déjà : touche « Se connecter »' : 'Erreur : ' + error.message); return; }
-    if (!data.session) { toast('Compte créé. Confirme ton e-mail (lien reçu), puis reviens te connecter.'); return; }
+    if (error) {
+      const m = error.message || '';
+      toast(/not confirmed/i.test(m) ? 'Adresse e-mail pas encore confirmée : ouvre le lien reçu par e-mail, puis touche « Se connecter ».'
+        : /rate limit|security purposes|after \d+ seconds/i.test(m) ? 'Trop de tentatives : attends une minute avant de réessayer.'
+        : /Invalid login/i.test(m) ? 'E-mail ou mot de passe incorrect'
+        : /registered/i.test(m) ? 'Ce compte existe déjà : touche « Se connecter »'
+        : 'Erreur : ' + m);
+      return;
+    }
+    if (!data.session) { toast('Compte créé. Ouvre le lien de confirmation reçu par e-mail, puis touche « Se connecter ».'); return; }
     s.remove(); toast('Connecté, synchronisation…');
   });
   document.body.append(s);
