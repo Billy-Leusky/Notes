@@ -359,3 +359,17 @@ textarea.fld{resize:vertical;line-height:1.4}
 .sheet .partgrid button.cur{background:var(--c);color:#fff}
 .sheet .partgrid button.cur b,.sheet .partgrid button.cur em{color:#fff}
 .sheet .okp:disabled{opacity:.45}
+
+/* ---------- Mode travail ---------- */
+.rec .wk{flex:none;width:32px;height:32px;display:grid;place-items:center;color:var(--acc)}
+.rec .wk svg{width:18px;height:18px}
+.wkbar{position:relative;height:44px;margin:10px 0 4px;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer}
+.wkfill{position:absolute;left:0;top:0;bottom:0;width:0;background:color-mix(in srgb,var(--acc) 35%,transparent)}
+.wkab{position:absolute;top:0;bottom:0;background:color-mix(in srgb,#2f6fe0 22%,transparent);border-left:2px solid #2f6fe0;border-right:2px solid #2f6fe0}
+.wkm{position:absolute;top:2px;transform:translateX(-50%);font-size:11px;font-weight:800;color:#fff;background:#2f6fe0;border-radius:5px;padding:1px 5px}
+.wktime{display:flex;justify-content:space-between;font-size:13px;color:var(--mute);font-variant-numeric:tabular-nums}
+.sheet .wkmain .wpl{flex:2;display:flex!important;align-items:center;justify-content:center;gap:6px;background:var(--acc)!important;color:#fff;border-color:var(--acc)!important}
+.sheet .wkmain .wpl svg{width:18px;height:18px;fill:currentColor;stroke:none}
+.sheet .speeds{flex-wrap:wrap}
+.sheet .speeds button{min-width:52px;font-size:14px}
+.sheet .mrow button.on{background:var(--acc);color:#fff;border-color:var(--acc)}

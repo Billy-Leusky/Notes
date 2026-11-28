@@ -228,6 +228,7 @@ document.addEventListener('click', e => {
     toast(r.official ? '★ Enregistrement officiel du chant' : 'Ce n\'est plus l\'enregistrement officiel');
     return;
   }
+  if (e.target.closest('.wk')) { stopPlay(); workSheet(c.dataset.id, c.dataset.title || 'Enregistrement'); return; }
   if (e.target.closest('.nm')) renameRec(c, cont);
   else if (e.target.closest('.sh')) shareRec(c);
   else if (e.target.closest('.x')) {
@@ -243,7 +244,7 @@ document.addEventListener('click', e => {
 function chip(id, d, title) {
   const c = document.createElement('div');
   c.className = 'rec'; c.contentEditable = 'false'; c.dataset.id = id; c.dataset.d = d.toFixed(1);
-  c.innerHTML = `<button class="pl" type="button" aria-label="Lire">${I.play}</button><span class="mid"><button class="nm" type="button" aria-label="Renommer"></button><span class="row"><span class="tr"><i></i></span><span class="t">${fmt(d)}</span></span></span><button class="sh" type="button" aria-label="Partager">${I.share}</button><button class="x" type="button" aria-label="Supprimer">${I.x}</button>`;
+  c.innerHTML = `<button class="pl" type="button" aria-label="Lire">${I.play}</button><span class="mid"><button class="nm" type="button" aria-label="Renommer"></button><span class="row"><span class="tr"><i></i></span><span class="t">${fmt(d)}</span></span></span><button class="wk" type="button" aria-label="Travailler (vitesse, boucle)"><svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></button><button class="sh" type="button" aria-label="Partager">${I.share}</button><button class="x" type="button" aria-label="Supprimer">${I.x}</button>`;
   setTitle(c, title);
   return c;
 }
@@ -2315,6 +2316,76 @@ $('#s-imp').onclick = () => { const s = curSong(); if (s) partSheet(s.struct, 'C
 $('#it-imp').onclick = () => { const c = curItem(); if (c) partSheet(itemSt(c.it), 'Ce fichier est…', part => { $('#it-file').__part = part; $('#it-file').click(); }); };
 importAudio($('#s-file'), curSong, s => clean(s.title || '') ? clean(s.title) + ' – référence' : '');
 importAudio($('#it-file'), () => (curItem() || {}).it, () => { const c = curItem(); return c ? itemRecTitles(c)[0] : ''; });
+
+
+// =====================================================================
+// =====================  Mode travail  ================================
+// =====================================================================
+// Lecteur pour apprendre : vitesse réduite sans changer la tonalité, boucle d'un passage (A → B)
+// ou de tout l'enregistrement, ±5 s, barre de position avec le passage marqué.
+let workSpeed = 1;
+async function workSheet(id, title) {
+  await loadAudio(id);
+  if (!urls[id]) { toast('Audio pas encore disponible sur cet appareil.'); return; }
+  const a = new Audio(urls[id]);
+  a.preservesPitch = a.mozPreservesPitch = a.webkitPreservesPitch = true; // la tonalité ne change pas
+  a.playbackRate = workSpeed;
+  let A = null, B = null, loop = false, raf = 0;
+  const sh = sheet('<p></p><div class="wkbar"><span class="wkab"></span><span class="wkfill"></span><span class="wkm wka">A</span><span class="wkm wkb">B</span></div><div class="wktime"><span class="cur">0:00</span><span class="dur"></span></div>'
+    + '<div class="mrow wkmain"><button class="m5">−5 s</button><button class="ok wpl"></button><button class="p5">+5 s</button></div>'
+    + '<small>Vitesse (la tonalité ne change pas)</small><div class="seg speeds">' + [0.5, 0.6, 0.75, 0.9, 1, 1.1].map(v => `<button data-sp="${v}">${Math.round(v * 100)} %</button>`).join('') + '</div>'
+    + '<small>Boucle</small><div class="mrow"><button class="sa">Début A</button><button class="sb">Fin B</button><button class="lp">Boucle</button></div><small class="abinfo"></small>'
+    + '<button class="alt clr hidden">Effacer le passage A-B</button><button class="cancel">Fermer</button>');
+  sh.querySelector('p').textContent = 'Travailler — ' + title;
+  const bar = sh.querySelector('.wkbar');
+  const dur = () => (isFinite(a.duration) && a.duration) || 0;
+  const draw = () => {
+    const d = dur(), pct = t => d ? Math.max(0, Math.min(100, t / d * 100)) : 0;
+    sh.querySelector('.wkfill').style.width = pct(a.currentTime) + '%';
+    sh.querySelector('.cur').textContent = fmt(a.currentTime);
+    sh.querySelector('.dur').textContent = d ? fmt(d) : '';
+    const wa = sh.querySelector('.wka'), wb = sh.querySelector('.wkb'), ab = sh.querySelector('.wkab');
+    wa.classList.toggle('hidden', A == null); wb.classList.toggle('hidden', B == null);
+    if (A != null) wa.style.left = pct(A) + '%';
+    if (B != null) wb.style.left = pct(B) + '%';
+    const s0 = A != null ? A : 0, s1 = B != null ? B : d;
+    ab.classList.toggle('hidden', !loop || !d);
+    ab.style.left = pct(s0) + '%'; ab.style.width = Math.max(0, pct(s1) - pct(s0)) + '%';
+    sh.querySelector('.wpl').innerHTML = a.paused ? I.play + ' Lecture' : I.pause + ' Pause';
+    sh.querySelectorAll('[data-sp]').forEach(x => x.classList.toggle('on', +x.dataset.sp === a.playbackRate));
+    sh.querySelector('.lp').classList.toggle('on', loop);
+    sh.querySelector('.lp').textContent = loop ? 'Boucle : oui' : 'Boucle';
+    sh.querySelector('.clr').classList.toggle('hidden', A == null && B == null);
+    sh.querySelector('.abinfo').textContent = A != null || B != null ? 'Passage : ' + fmt(A || 0) + ' → ' + (B != null ? fmt(B) : 'fin') + (loop ? ' (en boucle)' : '') : loop ? 'Tout l\'enregistrement tourne en boucle.' : 'Marque le début (A) et la fin (B) d\'un passage pendant la lecture, puis active la boucle.';
+  };
+  // Surveillance fine de la position pour une boucle précise
+  const watch = () => {
+    if (loop) { const end = B != null ? B : dur(), start = A != null ? A : 0; if (end && a.currentTime >= end - 0.03) a.currentTime = start; }
+    draw();
+    if (!a.paused) raf = requestAnimationFrame(watch);
+  };
+  a.addEventListener('play', () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(watch); draw(); });
+  a.addEventListener('pause', draw); a.addEventListener('loadedmetadata', draw); a.addEventListener('timeupdate', draw);
+  a.addEventListener('ended', () => { if (loop) { a.currentTime = A != null ? A : 0; a.play().catch(() => {}); } else draw(); });
+  const seek = t => { a.currentTime = Math.max(0, Math.min(dur() || 0, t)); draw(); };
+  bar.addEventListener('click', e => { const r = bar.getBoundingClientRect(); if (dur()) seek((e.clientX - r.left) / r.width * dur()); });
+  sh.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b.classList.contains('cancel')) return;
+    if (b.classList.contains('wpl')) { if (a.paused) { if (loop && B != null && a.currentTime >= B) a.currentTime = A || 0; a.play().catch(() => toast('Lecture impossible')); } else a.pause(); }
+    else if (b.classList.contains('m5')) seek(a.currentTime - 5);
+    else if (b.classList.contains('p5')) seek(a.currentTime + 5);
+    else if (b.dataset.sp) { workSpeed = +b.dataset.sp; a.playbackRate = workSpeed; a.preservesPitch = a.webkitPreservesPitch = true; }
+    else if (b.classList.contains('sa')) { A = a.currentTime; if (B != null && B <= A) B = null; }
+    else if (b.classList.contains('sb')) { const t = a.currentTime; if (A != null && t <= A) { toast('La fin (B) doit être après le début (A).'); return; } B = t; loop = true; if (A != null) a.currentTime = A; }
+    else if (b.classList.contains('lp')) loop = !loop;
+    else if (b.classList.contains('clr')) { A = B = null; }
+    draw();
+  });
+  draw();
+  // Fermer la fenêtre arrête la lecture
+  const obs = new MutationObserver(() => { if (!sh.isConnected) { a.pause(); cancelAnimationFrame(raf); obs.disconnect(); } });
+  obs.observe(document.body, { childList: true });
+}
 
 // ---------- Démarrage ----------
 await migrateLocal();
