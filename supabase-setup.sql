@@ -224,3 +224,18 @@ begin
 end $$;
 revoke execute on function public.cas_doc(text, text, uuid, jsonb, bigint, boolean) from public, anon;
 grant execute on function public.cas_doc(text, text, uuid, jsonb, bigint, boolean) to authenticated;
+
+-- ===== Confirmation automatique des nouveaux comptes =====
+-- Les membres d'une équipe peuvent se connecter tout de suite, sans e-mail de confirmation.
+-- (Pour revenir en arrière : drop trigger auto_confirm_new_user on auth.users;)
+create or replace function private.auto_confirm_new_user() returns trigger
+language plpgsql security definer set search_path = auth, public
+as $$
+begin
+  if new.email_confirmed_at is null then new.email_confirmed_at := now(); end if;
+  return new;
+end $$;
+revoke execute on function private.auto_confirm_new_user() from public, anon, authenticated;
+drop trigger if exists auto_confirm_new_user on auth.users;
+create trigger auto_confirm_new_user before insert on auth.users
+  for each row execute function private.auto_confirm_new_user();
