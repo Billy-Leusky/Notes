@@ -338,3 +338,18 @@ textarea.fld{resize:vertical;line-height:1.4}
 .rec .star.on{color:#e8a200}
 .rec.off{border-color:#e8a200;background:color-mix(in srgb,#e8a200 8%,var(--bg))}
 .rec .from{display:block;font-size:12px;color:var(--mute);font-weight:400}
+
+/* ---------- Enregistrements par partie ---------- */
+.recs .rgh{margin:10px 2px 2px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
+.recs .rgh:first-child{margin-top:0}
+.rec .pbadge{--c:#888;flex:none;align-self:flex-start;height:22px;padding:0 8px;border-radius:7px;background:var(--c);color:#fff;font-size:12px;font-weight:700;margin-bottom:4px}
+.rec .pbadge.full{background:transparent;color:var(--mute);border:1px solid var(--line);font-weight:500}
+.rec .mid{flex-direction:column;align-items:flex-start}
+.rec .mid .row{width:100%}
+.rec .pick{flex:none;width:32px;height:32px;display:grid;place-items:center;font-size:17px;opacity:.35;filter:grayscale(1)}
+.rec .pick.on{opacity:1;filter:none}
+.sheet .partgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;margin-top:6px}
+.sheet .partgrid button{--c:#888;height:auto;min-height:56px;margin:0;padding:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--bg);border:2px solid var(--c);color:var(--ink)}
+.sheet .partgrid button b{color:var(--c);font-size:17px}
+.sheet .partgrid button em{font-style:normal;font-size:12px;color:var(--mute);font-weight:500}
+.sheet .partgrid button.cur,.sheet .full.cur{box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 40%,transparent)}

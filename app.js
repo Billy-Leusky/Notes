@@ -197,9 +197,33 @@ document.addEventListener('click', e => {
   const cont = c.closest('.recs') || body;
   e.preventDefault();
   if (c.classList.contains('ro') && (e.target.closest('.nm') || e.target.closest('.x'))) { toast('Seuls son auteur et les responsables peuvent modifier cet enregistrement.'); return; }
+  if (e.target.closest('.pbadge')) {
+    const r = recDocs.get(c.dataset.id); if (!r) return;
+    if (c.classList.contains('ro')) { toast('Seuls son auteur et les responsables peuvent modifier cet enregistrement.'); return; }
+    const it = items.get(r.parentId), song = songs.get(recSong(r));
+    partSheet(it ? itemSt(it) : song ? song.struct : [], 'Cet enregistrement est…', part => {
+      const f = { part: part || null };
+      if (part && r.official) f.official = false; // l'officiel est toujours un chant complet
+      // Le titre suit la partie (« Oh Happy Day – C1 – 6 déc. » → « Oh Happy Day – C2 – 6 déc. »)
+      let t = r.title || '';
+      if (r.part) t = t.replace(new RegExp(' – ' + r.part.replace(/[^\w]/g, '') + '( – |$)'), (m, sep) => sep ? ' – ' : '');
+      if (part) t = withPart(t, part);
+      if (t !== r.title) f.title = t;
+      edit('rec', r, f); refreshUI(true);
+    }, r.part || 'full');
+    return;
+  }
+  if (e.target.closest('.pick')) {
+    const r = recDocs.get(c.dataset.id), it = r && items.get(r.parentId); if (!it) return;
+    if (!canEdit(it.team)) { toast('Seuls les responsables choisissent l\'enregistrement écouté.'); return; }
+    edit('item', it, { listenRec: r.id }); refreshUI(true);
+    toast('🎧 C\'est cet enregistrement qui sera écouté dans le set');
+    return;
+  }
   if (e.target.closest('.star')) {
     const r = recDocs.get(c.dataset.id); if (!r) return;
     if (!canEdit(r.team)) { toast('Seuls les responsables choisissent l\'enregistrement officiel.'); return; }
+    if (r.part) { toast('L\'enregistrement officiel doit être le chant complet.'); return; }
     setOfficial(r, !r.official);
     toast(r.official ? '★ Enregistrement officiel du chant' : 'Ce n\'est plus l\'enregistrement officiel');
     return;
@@ -1209,7 +1233,7 @@ const itemsOf = setId => [...items.values()].filter(i => i.setId === setId).sort
 // Chant auquel appartient un enregistrement (fiche du chant, ou chant d'un set)
 const recSong = r => !r ? null : songs.has(r.parentId) ? r.parentId : (items.get(r.parentId) || {}).songId || null;
 // L'enregistrement officiel d'un chant (un seul) : la version de référence de l'équipe
-const officialOf = songId => songId ? [...recDocs.values()].filter(r => r.official && recSong(r) === songId).sort((a, b) => (b._ts && b._ts.official || 0) - (a._ts && a._ts.official || 0))[0] || null : null;
+const officialOf = songId => songId ? [...recDocs.values()].filter(r => r.official && !r.part && recSong(r) === songId).sort((a, b) => (b._ts && b._ts.official || 0) - (a._ts && a._ts.official || 0))[0] || null : null;
 function setOfficial(r, on) {
   if (on) for (const o of [...recDocs.values()]) if (o !== r && o.official && recSong(o) === recSong(r)) edit('rec', o, { official: false });
   edit('rec', r, { official: !!on });
@@ -1372,29 +1396,53 @@ function renderSets() {
 
 // ---------- Enregistrements d'une fiche (chant ou chant d'un set) ----------
 // Chaque enregistrement est un document à part : chacun peut ajouter les siens.
-function renderRecs(host, parentId, suggest, extra = []) {
+function renderRecs(host, parentId, suggest, extra = [], opts = {}) {
   // extra : enregistrements montrés en plus (ex. l'officiel d'un chant, fait pendant une répétition)
-  const list = [...extra.filter(r => r && r.parentId !== parentId), ...recsOf(parentId)];
+  // opts.st : structure (pour ranger les parties) ; opts.pick : chant du set (choix 🎧 de l'enregistrement écouté)
+  const all = [...extra.filter(r => r && r.parentId !== parentId), ...recsOf(parentId)];
+  const order = partsOf(opts.st);
+  const rank = r => r.part ? (order.includes(r.part) ? order.indexOf(r.part) : 999) : -1;
+  const list = all.map((r, i) => [r, i]).sort((a, b) => (rank(a[0]) - rank(b[0])) || (a[1] - b[1])).map(x => x[0]);
+  const picked = opts.pick ? listenRecOf(opts.pick) : null;
   const ro = r => !(user && (r.owner === user.id || (!r.owner && !r.team))) && !canEdit(r.team) && r.team;
-  const sig = list.map(r => [r.id, r.title, r.d, ro(r) ? 1 : 0, r.official ? 1 : 0, canEdit(r.team) ? 1 : 0].join('|')).join('/');
+  const sig = list.map(r => [r.id, r.title, r.d, ro(r) ? 1 : 0, r.official ? 1 : 0, canEdit(r.team) ? 1 : 0, r.part || '', picked === r ? 1 : 0].join('|')).join('/') + '#' + order.join();
   host.recSuggest = suggest;
   if (host.__sig === sig) return;
   host.__sig = sig;
   const keep = {}; host.querySelectorAll('.rec').forEach(c => { keep[c.dataset.id] = c; });
   host.innerHTML = '';
+  const hasParts = list.some(r => r.part);
+  let group = null;
   for (const r of list) {
+    // Titres de groupe : « Chant complet », puis « Par partie »
+    const g = r.part ? 'parts' : 'full';
+    if (hasParts && g !== group) { group = g; const h = document.createElement('div'); h.className = 'rgh'; h.textContent = g === 'full' ? 'Chant complet' : 'Par partie'; host.append(h); }
     let c = keep[r.id];
     if (!c) { c = chip(r.id, r.d || 0, r.title); loadAudio(r.id); }
     else setTitle(c, r.title);
     c.classList.toggle('ro', !!ro(r));
     const by = r.team && r.owner && r.owner !== (user && user.id) ? memberName(r.team, r.owner) : '';
     c.title = by ? 'Enregistré par ' + by : '';
-    // Étoile : enregistrement officiel du chant (modifiable par les responsables)
+    // Partie (pastille) : touchée → changer la partie
+    let pb = c.querySelector('.pbadge');
+    if (!pb) { pb = document.createElement('button'); pb.type = 'button'; pb.className = 'pbadge'; c.querySelector('.nm').before(pb); }
+    pb.textContent = r.part || 'Complet';
+    pb.classList.toggle('full', !r.part);
+    pb.style.setProperty('--c', r.part ? partColor(r.part) : '#8a8a8e');
+    // 🎧 : enregistrement complet écouté pour ce set
+    let pk = c.querySelector('.pick');
+    if (opts.pick && !r.part) {
+      if (!pk) { pk = document.createElement('button'); pk.type = 'button'; pk.className = 'pick'; pk.textContent = '🎧'; c.querySelector('.sh').before(pk); }
+      pk.classList.toggle('on', picked === r);
+      pk.classList.toggle('hidden', picked !== r && !canEdit(opts.pick.team));
+      pk.setAttribute('aria-label', picked === r ? 'Écouté dans ce set' : 'Écouter celui-ci dans ce set');
+    } else if (pk) pk.remove();
+    // Étoile : enregistrement officiel du chant (modifiable par les responsables, chant complet seulement)
     let st = c.querySelector('.star');
     if (!st) { st = document.createElement('button'); st.type = 'button'; st.className = 'star'; c.querySelector('.sh').before(st); }
     st.textContent = r.official ? '★' : '☆';
     st.classList.toggle('on', !!r.official);
-    st.classList.toggle('hidden', !r.official && !canEdit(r.team));
+    st.classList.toggle('hidden', !!r.part || (!r.official && !canEdit(r.team)));
     st.setAttribute('aria-label', r.official ? 'Enregistrement officiel' : 'Marquer comme officiel');
     c.classList.toggle('off', !!r.official);
     const from = r.parentId !== parentId && items.get(r.parentId);
@@ -1416,9 +1464,10 @@ function recOp(c, op, title) {
   else remove('rec', r);
   refreshUI(true);
 }
-function newRec(parentId, team, title) {
+function newRec(parentId, team, title, part) {
   return (id, d, t) => {
     const r = { id, parentId, title: t, d, owner: user ? user.id : null, at: now() };
+    if (part) r.part = part; // partie de la structure (I, C1, R…) ; absente = chant complet
     const o = { ...r, team: team || null, _ts: {}, ver: 0, dirty: true, seq: 1 };
     const ts = now(); for (const k in r) if (k !== 'id') o._ts[k] = ts;
     if (o.team && user) { o._by = user.id; o._ts._by = ts; }
@@ -1426,6 +1475,31 @@ function newRec(parentId, team, title) {
     refreshUI(true);
   };
 }
+// ---------- Enregistrements par partie ----------
+// Parties proposées : les sections de la structure (I, C1, R, C2, P…), sans doublon, dans l'ordre.
+const partsOf = st => [...new Set((st || []).map(secLabel))];
+const partColor = p => secColor(String(p || '').replace(/\d+$/, ''));
+const partName = p => { const t = String(p || '').replace(/\d+$/, ''), n = String(p || '').match(/\d+$/); return SEC[t] ? SEC[t][0] + (n ? ' ' + n[0] : '') : p; };
+// Fenêtre « Que vas-tu enregistrer ? » : chant complet ou une partie
+function partSheet(st, title, onPick, current) {
+  const parts = partsOf(st);
+  if (current && current !== 'full' && !parts.includes(current)) parts.push(current);
+  const sh = sheet('<p></p><button class="ok full">Chant complet</button><small>' + (parts.length ? 'Ou une partie de la structure :' : 'Ajoute une structure au chant pour enregistrer par partie.') + '</small><div class="partgrid"></div><button class="cancel">Annuler</button>');
+  sh.querySelector('p').textContent = title;
+  sh.querySelector('.full').classList.toggle('cur', current === 'full');
+  sh.querySelector('.partgrid').innerHTML = parts.map(p => `<button data-part="${esc(p)}" class="${p === current ? 'cur' : ''}" style="--c:${partColor(p)}"><b>${esc(p)}</b><em>${esc(partName(p))}</em></button>`).join('');
+  sh.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.classList.contains('full')) { sh.remove(); onPick(''); }
+    else if (b.dataset.part) { sh.remove(); onPick(b.dataset.part); }
+  });
+}
+const withPart = (title, part) => part ? title.replace(/^([^–]+)( – |$)/, (m, a, sep) => a.trim() + ' – ' + part + (sep ? ' – ' : '')) : title;
+// Le bon enregistrement « complet » de répétition pour un chant d'un set : celui choisi (🎧),
+// sinon le dernier enregistré.
+const fullRecs = parentId => recsOf(parentId).filter(r => !r.part);
+const listenRecOf = it => { const list = fullRecs(it.id); return list.find(r => r.id === it.listenRec) || list.filter(r => !r.official).slice(-1)[0] || list.slice(-1)[0] || null; };
+
 // Notes perso (visibles par moi seul) sur un chant ou un chant d'un set d'équipe
 function bindPnote(sel, parentOf) {
   $(sel).addEventListener('input', () => {
@@ -1453,7 +1527,7 @@ function renderSong(t) {
   setV('#s-style', s.style || ''); setV('#s-links', s.links || ''); setV('#s-notes', s.notes || '');
   $('#s-mod').textContent = modLine(s);
   drawLinks(s); songSt.draw(); drawMetroBtns();
-  renderRecs($('#s-recs'), s.id, songSuggest(s), [officialOf(s.id)]);
+  renderRecs($('#s-recs'), s.id, songSuggest(s), [officialOf(s.id)], { st: s.struct });
   drawVideos(s);
   drawPnote('#s-mine', '#s-pnote', s);
   const used = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1485,7 +1559,8 @@ const songSt = structEditor($('#s-struct'), () => (curSong() || {}).struct || []
 $('#s-rec').onclick = () => {
   if (rec) return stopRec();
   const s = curSong(); if (!s) return;
-  recToggle(clean(s.title || '') ? clean(s.title) + (s.key ? ' – ' + keyLabel(s.key) : '') : 'Enregistrement', newRec(s.id, s.team));
+  const base = clean(s.title || '') ? clean(s.title) + (s.key ? ' – ' + keyLabel(s.key) : '') : 'Enregistrement';
+  partSheet(s.struct, 'Que vas-tu enregistrer ?', part => recToggle(withPart(base, part), newRec(s.id, s.team, '', part)));
 };
 $('#s-used').addEventListener('click', e => { const b = e.target.closest('[data-goset]'); if (b) go('set', { id: b.dataset.goset }); });
 $('#s-del').onclick = () => {
@@ -1600,7 +1675,7 @@ function renderItem() {
   setV('#it-lead', it.lead || ''); setV('#it-note', it.note || '');
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
-  renderRecs($('#it-recs'), it.id, () => itemRecTitles(c));
+  renderRecs($('#it-recs'), it.id, () => itemRecTitles(c), [], { st: itemSt(it), pick: it });
   drawItemListen(c);
   drawPnote('#it-mine', '#it-pnote', it);
 }
@@ -1635,7 +1710,7 @@ $('#it-del').onclick = () => {
 $('#it-rec').onclick = () => {
   if (rec) return stopRec();
   const c = curItem(); if (!c) return;
-  recToggle(itemRecTitles(c)[0], newRec(c.it.id, c.it.team));
+  partSheet(itemSt(c.it), 'Que vas-tu enregistrer ?', part => recToggle(withPart(itemRecTitles(c)[0], part), newRec(c.it.id, c.it.team, '', part)));
 };
 
 
@@ -2022,8 +2097,9 @@ function listenSheet(set) {
   const audio = new Audio(); audio.preload = 'auto';
   const entries = () => itemsOf(set.id).map(it => {
     const song = songs.get(it.songId), off = officialOf(it.songId);
-    const rep = recsOf(it.id).filter(r => r !== off).slice(-1)[0] || null;
-    const ref = song && !off ? recsOf(song.id).slice(-1)[0] || null : null;
+    // Écoute : seulement les enregistrements du chant complet
+    const lr = listenRecOf(it), rep = lr && lr !== off ? lr : null;
+    const ref = song && !off ? fullRecs(song.id).slice(-1)[0] || null : null;
     return { it, song, off, rep, ref, yt: itemYt(it), vids: songVideos(song) };
   });
   // Versions jouables d'un chant, dans l'ordre de préférence : choix du set (« À écouter »),
@@ -2217,12 +2293,13 @@ function importAudio(input, parentOf, titleOf) {
     const id = uid();
     await putAudio({ id, blob, d });
     urls[id] = u; memBlob(id, blob);
-    newRec(p.id, p.team, '')(id, d, titleOf(p) || clean(f.name.replace(/\.[^.]+$/, '')));
+    const part = input.__part || ''; input.__part = '';
+    newRec(p.id, p.team, '', part)(id, d, withPart(titleOf(p) || clean(f.name.replace(/\.[^.]+$/, '')), part));
     toast('Fichier audio ajouté');
   });
 }
-$('#s-imp').onclick = () => $('#s-file').click();
-$('#it-imp').onclick = () => $('#it-file').click();
+$('#s-imp').onclick = () => { const s = curSong(); if (s) partSheet(s.struct, 'Ce fichier est…', part => { $('#s-file').__part = part; $('#s-file').click(); }); };
+$('#it-imp').onclick = () => { const c = curItem(); if (c) partSheet(itemSt(c.it), 'Ce fichier est…', part => { $('#it-file').__part = part; $('#it-file').click(); }); };
 importAudio($('#s-file'), curSong, s => clean(s.title || '') ? clean(s.title) + ' – référence' : '');
 importAudio($('#it-file'), () => (curItem() || {}).it, () => { const c = curItem(); return c ? itemRecTitles(c)[0] : ''; });
 
