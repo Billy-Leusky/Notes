@@ -319,3 +319,22 @@ textarea.fld{resize:vertical;line-height:1.4}
 .lrow .src.off{color:var(--mute);text-decoration:line-through}
 .lrow .none{color:var(--rec);font-size:13px}
 .lrow input{flex-basis:100%;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;background:var(--card);color:var(--ink)}
+
+/* ---------- Versions YouTube ---------- */
+.vids{display:flex;flex-direction:column;gap:6px}
+.vrow{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.vrow .vdef{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px;color:var(--mute)}
+.vrow .vdef.on{color:var(--acc)}
+.vrow .vl{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:15px;color:var(--ink);outline:0;padding:6px 0}
+.vrow .vl:disabled{-webkit-text-fill-color:var(--ink);opacity:1}
+.vrow a{font-size:14px;color:var(--acc);text-decoration:none;flex:none}
+.vrow .vx{flex:none;width:32px;height:32px;display:grid;place-items:center;color:var(--mute)}
+.vrow small{color:var(--mute);font-size:12px;flex:none}
+.vadd{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-top:6px}
+.vadd button{padding:0 14px;border-radius:12px;background:var(--acc);color:#fff;font-weight:600}
+@media(max-width:520px){.vadd{grid-template-columns:1fr auto}.vadd #s-vurl{grid-column:1/-1}}
+/* ---------- Enregistrement officiel ---------- */
+.rec .star{flex:none;width:32px;height:32px;display:grid;place-items:center;font-size:19px;color:var(--mute);line-height:1}
+.rec .star.on{color:#e8a200}
+.rec.off{border-color:#e8a200;background:color-mix(in srgb,#e8a200 8%,var(--bg))}
+.rec .from{display:block;font-size:12px;color:var(--mute);font-weight:400}

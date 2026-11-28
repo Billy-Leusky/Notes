@@ -197,6 +197,13 @@ document.addEventListener('click', e => {
   const cont = c.closest('.recs') || body;
   e.preventDefault();
   if (c.classList.contains('ro') && (e.target.closest('.nm') || e.target.closest('.x'))) { toast('Seuls son auteur et les responsables peuvent modifier cet enregistrement.'); return; }
+  if (e.target.closest('.star')) {
+    const r = recDocs.get(c.dataset.id); if (!r) return;
+    if (!canEdit(r.team)) { toast('Seuls les responsables choisissent l\'enregistrement officiel.'); return; }
+    setOfficial(r, !r.official);
+    toast(r.official ? '★ Enregistrement officiel du chant' : 'Ce n\'est plus l\'enregistrement officiel');
+    return;
+  }
   if (e.target.closest('.nm')) renameRec(c, cont);
   else if (e.target.closest('.sh')) shareRec(c);
   else if (e.target.closest('.x')) {
@@ -1199,6 +1206,15 @@ function checkPendingJoin() {
 
 // ---------- Données dérivées ----------
 const itemsOf = setId => [...items.values()].filter(i => i.setId === setId).sort((a, b) => (a.pos - b.pos) || a.id.localeCompare(b.id));
+// Chant auquel appartient un enregistrement (fiche du chant, ou chant d'un set)
+const recSong = r => !r ? null : songs.has(r.parentId) ? r.parentId : (items.get(r.parentId) || {}).songId || null;
+// L'enregistrement officiel d'un chant (un seul) : la version de référence de l'équipe
+const officialOf = songId => songId ? [...recDocs.values()].filter(r => r.official && recSong(r) === songId).sort((a, b) => (b._ts && b._ts.official || 0) - (a._ts && a._ts.official || 0))[0] || null : null;
+function setOfficial(r, on) {
+  if (on) for (const o of [...recDocs.values()]) if (o !== r && o.official && recSong(o) === recSong(r)) edit('rec', o, { official: false });
+  edit('rec', r, { official: !!on });
+  refreshUI(true);
+}
 const recsOf = parentId => [...recDocs.values()].filter(r => r.parentId === parentId).sort((a, b) => (a.at || 0) - (b.at || 0));
 const itemTitle = it => clean((songs.get(it.songId) || {}).title || it.title || '') || 'Chant supprimé';
 const itemKey = it => it.key || (songs.get(it.songId) || {}).key || '';
@@ -1356,10 +1372,11 @@ function renderSets() {
 
 // ---------- Enregistrements d'une fiche (chant ou chant d'un set) ----------
 // Chaque enregistrement est un document à part : chacun peut ajouter les siens.
-function renderRecs(host, parentId, suggest) {
-  const list = recsOf(parentId);
+function renderRecs(host, parentId, suggest, extra = []) {
+  // extra : enregistrements montrés en plus (ex. l'officiel d'un chant, fait pendant une répétition)
+  const list = [...extra.filter(r => r && r.parentId !== parentId), ...recsOf(parentId)];
   const ro = r => !(user && (r.owner === user.id || (!r.owner && !r.team))) && !canEdit(r.team) && r.team;
-  const sig = list.map(r => [r.id, r.title, r.d, ro(r) ? 1 : 0].join('|')).join('/');
+  const sig = list.map(r => [r.id, r.title, r.d, ro(r) ? 1 : 0, r.official ? 1 : 0, canEdit(r.team) ? 1 : 0].join('|')).join('/');
   host.recSuggest = suggest;
   if (host.__sig === sig) return;
   host.__sig = sig;
@@ -1372,6 +1389,18 @@ function renderRecs(host, parentId, suggest) {
     c.classList.toggle('ro', !!ro(r));
     const by = r.team && r.owner && r.owner !== (user && user.id) ? memberName(r.team, r.owner) : '';
     c.title = by ? 'Enregistré par ' + by : '';
+    // Étoile : enregistrement officiel du chant (modifiable par les responsables)
+    let st = c.querySelector('.star');
+    if (!st) { st = document.createElement('button'); st.type = 'button'; st.className = 'star'; c.querySelector('.sh').before(st); }
+    st.textContent = r.official ? '★' : '☆';
+    st.classList.toggle('on', !!r.official);
+    st.classList.toggle('hidden', !r.official && !canEdit(r.team));
+    st.setAttribute('aria-label', r.official ? 'Enregistrement officiel' : 'Marquer comme officiel');
+    c.classList.toggle('off', !!r.official);
+    const from = r.parentId !== parentId && items.get(r.parentId);
+    let fr = c.querySelector('.from');
+    if (from) { const set = sets.get(from.setId); if (!fr) { fr = document.createElement('span'); fr.className = 'from'; c.querySelector('.mid').append(fr); } fr.textContent = 'Enregistré en répétition' + (set ? ' · ' + (clean(set.name || '') || 'set') + (set.date ? ' du ' + dShort(set.date) : '') : ''); }
+    else if (fr) fr.remove();
     host.append(c);
   }
 }
@@ -1424,7 +1453,8 @@ function renderSong(t) {
   setV('#s-style', s.style || ''); setV('#s-links', s.links || ''); setV('#s-notes', s.notes || '');
   $('#s-mod').textContent = modLine(s);
   drawLinks(s); songSt.draw(); drawMetroBtns();
-  renderRecs($('#s-recs'), s.id, songSuggest(s));
+  renderRecs($('#s-recs'), s.id, songSuggest(s), [officialOf(s.id)]);
+  drawVideos(s);
   drawPnote('#s-mine', '#s-pnote', s);
   const used = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   html($('#s-used'), used.length ? used.map(x => `<button data-goset="${esc(x.id)}">${esc((dShort(x.date) ? dShort(x.date) + ' · ' : '') + (clean(x.name || '') || 'Set sans nom'))} ›</button>`).join('') : '<span>Dans aucun set pour l\'instant.</span>');
@@ -1571,6 +1601,7 @@ function renderItem() {
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
   renderRecs($('#it-recs'), it.id, () => itemRecTitles(c));
+  drawItemListen(c);
   drawPnote('#it-mine', '#it-pnote', it);
 }
 function drawItemKey({ it, song }) {
@@ -1933,8 +1964,25 @@ $('#st-metro').onclick = () => {
 // YouTube crée une playlist temporaire à partir d'une liste de vidéos (sans compte ni clé).
 // On prend le premier lien YouTube de la fiche de chaque chant, dans l'ordre du set.
 function ytId(u) { const m = String(u || '').match(/(?:youtu\.be\/|[?&]v=|\/(?:embed|shorts|live|v)\/)([\w-]{11})(?![\w-])/); return m ? m[1] : null; }
-const songYt = song => { for (const u of String((song && song.links) || '').split(/\s+/)) { const id = ytId(u); if (id) return id; } return null; };
-const setYtIds = set => itemsOf(set.id).map(it => songYt(songs.get(it.songId))).filter(Boolean);
+// Versions YouTube d'un chant : liste « videos » [{ id, label }] (la première = par défaut),
+// plus les liens YouTube encore écrits dans « liens » (anciennes fiches).
+function songVideos(song) {
+  if (!song) return [];
+  const out = [], seen = new Set();
+  for (const v of Array.isArray(song.videos) ? song.videos : []) if (v && v.id && !seen.has(v.id)) { seen.add(v.id); out.push({ id: v.id, label: v.label || '' }); }
+  for (const line of String(song.links || '').split('\n')) { const id = ytId(line); if (id && !seen.has(id)) { seen.add(id); out.push({ id, label: clean(line.replace(/https?:\/\/\S+/g, '')) }); } }
+  return out;
+}
+const songYt = song => (songVideos(song)[0] || {}).id || null;
+// Version choisie pour un chant d'un set (sinon la version par défaut du chant)
+const itemYt = it => { const song = songs.get(it.songId), vs = songVideos(song); return it.video && vs.some(v => v.id === it.video) ? it.video : (vs[0] || {}).id || null; };
+const setYtIds = set => itemsOf(set.id).map(itemYt).filter(Boolean);
+const vidName = (v, i) => clean(v.label || '') || 'Version ' + (i + 1);
+// Enregistre la liste des versions ; les liens YouTube sortent du champ « liens »
+function saveVideos(song, list) {
+  edit('song', song, { videos: list.map(v => ({ id: v.id, label: clean(v.label || '') })), links: String(song.links || '').split('\n').filter(l => !ytId(l)).join('\n').trim() });
+  if (curSong() === song) { setV('#s-links', song.links); drawLinks(song); }
+}
 const ytWatch = ids => 'https://www.youtube.com/watch_videos?video_ids=' + ids.join(',');
 // Lecteur YouTube piloté par l'app (interface officielle « IFrame Player API ») : c'est l'app qui
 // lance chaque vidéo et passe au chant suivant à la fin, donc la liste et la vidéo correspondent
@@ -1961,7 +2009,7 @@ function loadYtApi() {
 // référence (fiche du chant) et/ou vidéo YouTube. La lecture enchaîne les chants dans l'ordre du
 // set ; « Enregistrements » ou « YouTube » indique la version jouée en priorité.
 // Les enregistrements sont lus depuis l'appareil : sans pub et même sans Internet.
-const SRC_NAME = { rep: 'Répétition', ref: 'Référence', yt: 'YouTube' };
+const SRC_NAME = { off: '★ Officiel', rep: 'Répétition', ref: 'Fiche', yt: 'YouTube' };
 function listenSheet(set) {
   let mode = pref('listenMode', 'rec');
   const sh = sheet('<p>Écouter le set</p><div class="seg"><button data-m="rec">Enregistrements</button><button data-m="yt">YouTube</button></div>'
@@ -1973,23 +2021,28 @@ function listenSheet(set) {
   const bad = new Set(), missing = new Set();
   const audio = new Audio(); audio.preload = 'auto';
   const entries = () => itemsOf(set.id).map(it => {
-    const song = songs.get(it.songId);
-    return { it, song, rep: recsOf(it.id).slice(-1)[0] || null, ref: song ? recsOf(song.id).slice(-1)[0] || null : null, yt: songYt(song) };
+    const song = songs.get(it.songId), off = officialOf(it.songId);
+    const rep = recsOf(it.id).filter(r => r !== off).slice(-1)[0] || null;
+    const ref = song && !off ? recsOf(song.id).slice(-1)[0] || null : null;
+    return { it, song, off, rep, ref, yt: itemYt(it), vids: songVideos(song) };
   });
-  // Versions jouables d'un chant, dans l'ordre de préférence
+  // Versions jouables d'un chant, dans l'ordre de préférence : choix du set (« À écouter »),
+  // sinon l'officiel d'abord ; « YouTube » en haut de la fenêtre met YouTube en premier.
   const sources = e => {
-    const recs = [e.rep && !missing.has(e.rep.id) && { k: 'rep', rec: e.rep }, e.ref && !missing.has(e.ref.id) && { k: 'ref', rec: e.ref }].filter(Boolean);
-    const y = e.yt && !bad.has(e.yt) ? [{ k: 'yt', id: e.yt }] : [];
-    return mode === 'yt' ? [...y, ...recs] : [...recs, ...y];
+    const r = k => e[k] && !missing.has(e[k].id) && { k, rec: e[k] };
+    const y = e.yt && !bad.has(e.yt) ? { k: 'yt', id: e.yt } : null;
+    const order = mode === 'yt' || e.it.listen === 'yt' ? [y, r('off'), r('rep'), r('ref')] : e.it.listen === 'rep' ? [r('rep'), r('off'), r('ref'), y] : [r('off'), r('rep'), r('ref'), y];
+    return order.filter(Boolean);
   };
   // Les enregistrements sont préparés dès l'ouverture (lecture immédiate au toucher)
-  for (const e of entries()) for (const r of [e.rep, e.ref]) if (r) loadAudio(r.id);
+  for (const e of entries()) for (const r of [e.off, e.rep, e.ref]) if (r) loadAudio(r.id);
   const stopAll = () => { audio.pause(); try { if (player && ready) player.pauseVideo(); } catch (er) {} };
-  function play(i, k) {
+  function play(i, k, vid) {
     const es = entries();
     if (i < 0 || i >= es.length) { stopAll(); cur = -1; curKind = null; draw(); return; }
     const list = sources(es[i]);
-    const src = (k && list.find(x => x.k === k)) || list[0];
+    let src = (k && list.find(x => x.k === k)) || list[0];
+    if (vid) src = { k: 'yt', id: vid }; // version YouTube choisie avec ▾
     if (!src) return play(i + 1, null); // rien à écouter pour ce chant : on passe au suivant
     cur = i; curKind = src.k; stopAll();
     if (src.k === 'yt') { ap.classList.add('hidden'); box.classList.remove('hidden'); ytPlay(src.id); }
@@ -2046,25 +2099,40 @@ function listenSheet(set) {
     sh.querySelectorAll('[data-m]').forEach(x => x.classList.toggle('on', x.dataset.m === mode));
     const es = entries(), withRec = es.filter(e => e.rep || e.ref).length, withYt = es.filter(e => e.yt).length;
     sh.querySelector('.ys').textContent = !es.length ? 'Aucun chant dans ce set.'
-      : es.length + ' chants · ' + withRec + ' avec enregistrement · ' + withYt + ' avec YouTube · touche un chant pour le lancer';
+      : es.length + (es.length > 1 ? ' chants · ' : ' chant · ') + withRec + ' avec enregistrement · ' + withYt + ' avec YouTube · touche un chant pour le lancer';
     const ytIds = setYtIds(set);
     sh.querySelector('.open').classList.toggle('hidden', !ytIds.length);
     sh.querySelector('.copy').classList.toggle('hidden', !ytIds.length);
     html(sh.querySelector('.ytlist'), es.map((e, i) => {
       const isCur = i === cur, title = itemTitle(e.it), q = encodeURIComponent([title, e.song && e.song.artist].filter(Boolean).join(' '));
       const btn = (k, ok, off) => ok ? `<button class="src${isCur && curKind === k ? ' on' : ''}${off ? ' off' : ''}" data-k="${k}" type="button">${isCur && curKind === k ? '▶ ' : ''}${SRC_NAME[k]}</button>` : '';
-      const srcs = btn('rep', e.rep, e.rep && missing.has(e.rep.id)) + btn('ref', e.ref, e.ref && missing.has(e.ref.id)) + btn('yt', e.yt, e.yt && bad.has(e.yt));
+      const srcs = btn('off', e.off, e.off && missing.has(e.off.id)) + btn('rep', e.rep, e.rep && missing.has(e.rep.id)) + btn('ref', e.ref, e.ref && missing.has(e.ref.id)) + btn('yt', e.yt, e.yt && bad.has(e.yt))
+        + (e.vids.length > 1 ? '<button class="src vsel" data-v="1" type="button" aria-label="Choisir la version YouTube">▾</button>' : '');
       const editable = e.song && canEdit(e.song.team);
       return `<div class="lrow${isCur ? ' cur' : ''}" data-i="${i}" data-song="${esc(e.song ? e.song.id : '')}"><b>${i + 1}. ${esc(title)}</b><span class="srcs">${srcs || '<span class="none">rien à écouter</span>'}`
         + (!e.yt ? `<a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher sur YouTube</a>${editable ? '<button class="add" type="button">Coller un lien</button>' : ''}` : '')
         + '</span></div>';
     }).join(''));
   };
+  // ▾ : choisir une version YouTube ; les responsables la retiennent pour ce set
+  function versionPicker(i) {
+    const e = entries()[i]; if (!e) return;
+    const p = sheet('<p></p><div class="pick"></div><button class="cancel">Annuler</button>');
+    p.querySelector('p').textContent = 'Versions YouTube — ' + itemTitle(e.it);
+    p.querySelector('.pick').innerHTML = e.vids.map((v, j) => `<button data-vid="${v.id}" class="${v.id === e.yt ? 'on' : ''}"><b>${esc(vidName(v, j))}</b><em>${j ? '' : 'par défaut'}${v.id === e.yt ? (j ? '' : ' · ') + 'choisie pour ce set' : ''}</em></button>`).join('');
+    p.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-vid]'); if (!b) return;
+      p.remove();
+      if (canEdit(e.it.team)) { edit('item', e.it, { video: b.dataset.vid === (e.vids[0] || {}).id ? null : b.dataset.vid }); toast('Version retenue pour ce set'); }
+      play(i, 'yt', b.dataset.vid);
+    });
+  }
   draw();
   sh.addEventListener('click', async e => {
     const b = e.target.closest('button'), row = e.target.closest('.lrow');
     if (b && b.dataset.m) { mode = b.dataset.m; setPref('listenMode', mode); draw(); return; }
     if (b && b.dataset.k && row) { play(+row.dataset.i, b.dataset.k); return; }
+    if (b && b.dataset.v && row) { versionPicker(+row.dataset.i); return; }
     if (row && !b && !e.target.closest('a,input')) { play(+row.dataset.i, null); return; }
     if (!b) return;
     const ids = setYtIds(set);
@@ -2078,7 +2146,8 @@ function listenSheet(set) {
         const song = songs.get(row.dataset.song), id = ytId(inp.value);
         if (!song) return;
         if (!id) { toast('Ce n\'est pas un lien YouTube.'); return; }
-        edit('song', song, { links: [clean(inp.value), song.links || ''].filter(Boolean).join('\n') });
+        const vs = songVideos(song); if (!vs.some(v => v.id === id)) vs.push({ id, label: '' });
+        saveVideos(song, vs);
         html(sh.querySelector('.ytlist'), ''); draw();
         toast('Lien ajouté à la fiche du chant');
       });
@@ -2089,6 +2158,50 @@ function listenSheet(set) {
   obs.observe(document.body, { childList: true });
 }
 $('#set-yt').onclick = () => { const s = curSet(); if (s) listenSheet(s); };
+
+// ---------- Versions YouTube dans la fiche du chant ----------
+function drawVideos(s) {
+  const vs = songVideos(s), ed = canEdit(s.team);
+  const box = $('#s-vids');
+  const sig = JSON.stringify([vs, ed]);
+  if (box.__sig === sig) return;
+  box.__sig = sig;
+  box.innerHTML = vs.length ? vs.map((v, i) => `<div class="vrow" data-id="${v.id}"><button class="vdef${i ? '' : ' on'}" type="button" title="${i ? 'Définir par défaut' : 'Version par défaut'}"${ed ? '' : ' disabled'}>${i ? '☆' : '★'}</button><input class="vl" value="${esc(v.label || '')}" placeholder="${esc(vidName(v, i))}"${ed ? '' : ' disabled'}>${i ? '' : '<small>par défaut</small>'}<a href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">Voir</a>${ed ? '<button class="vx" type="button" aria-label="Retirer">✕</button>' : ''}</div>`).join('')
+    : '<span class="empty-st">Aucune vidéo pour l\'instant.</span>';
+}
+$('#s-vids').addEventListener('click', e => {
+  const s = curSong(), row = e.target.closest('.vrow'); if (!s || !row || !canEdit(s.team)) return;
+  const vs = songVideos(s), i = vs.findIndex(v => v.id === row.dataset.id); if (i < 0) return;
+  if (e.target.closest('.vdef') && i > 0) { const [v] = vs.splice(i, 1); vs.unshift(v); saveVideos(s, vs); drawVideos(s); toast('« ' + vidName(v, 0) + ' » est la version par défaut'); }
+  else if (e.target.closest('.vx')) { vs.splice(i, 1); saveVideos(s, vs); drawVideos(s); }
+});
+$('#s-vids').addEventListener('change', e => {
+  const s = curSong(), row = e.target.closest('.vrow'); if (!s || !row || !e.target.classList.contains('vl')) return;
+  const vs = songVideos(s), v = vs.find(x => x.id === row.dataset.id); if (!v) return;
+  v.label = e.target.value; saveVideos(s, vs);
+});
+$('#s-vadd').onclick = () => {
+  const s = curSong(); if (!s) return;
+  const id = ytId($('#s-vurl').value);
+  if (!id) { toast('Colle un lien YouTube valide.'); return; }
+  const vs = songVideos(s);
+  if (vs.some(v => v.id === id)) { toast('Cette vidéo est déjà dans les versions.'); return; }
+  vs.push({ id, label: clean($('#s-vlabel').value) });
+  saveVideos(s, vs); $('#s-vurl').value = ''; $('#s-vlabel').value = ''; drawVideos(s);
+  toast(vs.length === 1 ? 'Vidéo ajoutée (version par défaut)' : 'Version ajoutée');
+};
+
+// ---------- Chant d'un set : version YouTube et enregistrement à écouter ----------
+function drawItemListen({ it, song }) {
+  const vs = songVideos(song);
+  html($('#it-video'), (vs.length ? `<option value="">Par défaut (${esc(vidName(vs[0], 0))})</option>` : '<option value="">Aucune vidéo</option>')
+    + vs.slice(1).map((v, i) => `<option value="${v.id}">${esc(vidName(v, i + 1))}</option>`).join(''));
+  setV('#it-video', it.video && vs.some(v => v.id === it.video) && vs[0].id !== it.video ? it.video : '');
+  $('#it-video').disabled = !canEdit(it.team) || vs.length < 2;
+  setV('#it-listen', it.listen || '');
+}
+$('#it-video').addEventListener('change', () => { const c = curItem(); if (c) edit('item', c.it, { video: $('#it-video').value || null }); });
+$('#it-listen').addEventListener('change', () => { const c = curItem(); if (c) edit('item', c.it, { listen: $('#it-listen').value || null }); });
 
 // ---------- Importer un fichier audio (version de référence ou répétition) ----------
 function importAudio(input, parentOf, titleOf) {
