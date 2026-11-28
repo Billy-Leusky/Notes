@@ -1419,7 +1419,7 @@ function renderSong(t) {
   setV('#s-bpm', s.bpm || ''); setV('#s-sig', s.sig || ''); setV('#s-dur', s.dur ? fmt(s.dur) : '');
   setV('#s-style', s.style || ''); setV('#s-links', s.links || ''); setV('#s-notes', s.notes || '');
   $('#s-mod').textContent = modLine(s);
-  drawLinks(s); songSt.draw();
+  drawLinks(s); songSt.draw(); drawMetroBtns();
   renderRecs($('#s-recs'), s.id, songSuggest(s));
   drawPnote('#s-mine', '#s-pnote', s);
   const used = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1562,7 +1562,7 @@ function renderItem() {
   $('#it-open').classList.toggle('hidden', !song);
   $('#it-info').textContent = song ? [song.key && 'Tonalité d\'origine : ' + keyLabel(song.key), song.bpm && song.bpm + ' BPM', song.sig, song.style].filter(Boolean).join(' · ') : 'Ce chant a été supprimé de la bibliothèque.';
   $('#it-mod').textContent = modLine(it);
-  drawItemKey(c);
+  drawItemKey(c); drawMetroBtns();
   setV('#it-lead', it.lead || ''); setV('#it-note', it.note || '');
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
@@ -1627,6 +1627,8 @@ function openStage(set, i = 0) {
   try { const d = document.documentElement; if (d.requestFullscreen && !document.fullscreenElement) d.requestFullscreen().catch(() => {}); } catch (e) {}
 }
 function closeStage() {
+  stageArmed = false;
+  if (M.src === 'stage') metroStop();
   keepAwake(false); stageLeave();
   try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
 }
@@ -1653,6 +1655,7 @@ function renderStage(t) {
   $('#st-pnote').textContent = pn ? '✎ ' + pn : '';
   $('#st-next').textContent = nx ? 'Ensuite : ' + itemTitle(nx) + (itemKey(nx) ? ' — ' + keyLabel(itemKey(nx)) : '') : 'Dernier chant du set';
   $('#st-prev').disabled = t.i === 0; $('#st-nextb').disabled = !nx;
+  stageMetroSync();
   const team = !!(set.team && user && stageCh);
   $('#st-lead').classList.toggle('hidden', !(team && canEdit(set.team)));
   $('#st-lead').classList.toggle('on', stageLead);
@@ -1757,6 +1760,8 @@ function setText(set, wa = true) {
     if (it.note) L.push('↳ ' + It(it.note));
   });
   if (!its.length) L.push(It('Aucun chant pour l\'instant.'));
+  const yt = setYtIds(set);
+  if (yt.length) L.push('', sep, '▶ ' + B('Playlist YouTube'), ytWatch(yt));
   if (clean(set.notes || '')) L.push('', sep, '✎ ' + B('Notes'), set.notes.trim());
   return L.join('\n');
 }
@@ -1800,6 +1805,180 @@ $('#set-share').onclick = () => {
 // L'app elle-même est gardée sur l'appareil : elle s'ouvre même sans réseau. Les modifications
 // faites hors ligne sont envoyées au retour du réseau.
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(e => console.warn('hors ligne indisponible', e));
+
+
+// =====================================================================
+// =====================  Métronome  ===================================
+// =====================================================================
+// Son généré sur l'appareil (Web Audio) avec une programmation en avance des « clics » pour un
+// tempo régulier. Premier temps de la mesure accentué. 6/8 et 12/8 : battue à la noire pointée.
+const beatsOf = sig => ({ '3/4': 3, '2/4': 2, '6/8': 2, '12/8': 4 })[sig] || 4;
+const M = { ctx: null, on: false, src: '', bpm: 100, beats: 4, beat: 0, next: 0, timer: null, onBeat: null };
+function metroStart(bpm, beats, onBeat, src) {
+  metroStop();
+  // iPhone / iPad : jouer le son même si le bouton silencieux est activé
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { if (AC && !M.ctx) M.ctx = new AC(); if (M.ctx && M.ctx.state !== 'running') M.ctx.resume(); } catch (e) { M.ctx = null; }
+  Object.assign(M, { on: true, src, bpm, beats, beat: 0, onBeat, next: M.ctx ? M.ctx.currentTime + 0.08 : 0 });
+  if (!M.ctx) { // pas de son possible : clignotement seul
+    M.timer = setInterval(() => { onBeat && onBeat(M.beat); M.beat = (M.beat + 1) % M.beats; }, 60000 / bpm);
+    return;
+  }
+  const tick = () => {
+    if (!M.on) return;
+    while (M.next < M.ctx.currentTime + 0.12) {
+      const b = M.beat, t = M.next;
+      metroClick(t, b === 0 && M.beats > 1);
+      setTimeout(() => { if (M.on && M.onBeat === onBeat && onBeat) onBeat(b); }, Math.max(0, (t - M.ctx.currentTime) * 1000));
+      M.next += 60 / M.bpm; M.beat = (M.beat + 1) % M.beats;
+    }
+  };
+  tick(); M.timer = setInterval(tick, 25);
+}
+function metroClick(t, acc) {
+  const c = M.ctx, o = c.createOscillator(), g = c.createGain();
+  o.type = 'sine'; o.frequency.value = acc ? 1760 : 1100;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(acc ? 0.9 : 0.5, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.08);
+}
+function metroStop() {
+  clearInterval(M.timer); M.timer = null; M.on = false; M.onBeat = null; M.src = '';
+  document.querySelectorAll('.beats i, .stbeat i').forEach(i => i.classList.remove('on'));
+  drawMetroBtns();
+}
+function drawBeats(el, n, b) {
+  if (!el) return;
+  if (el.children.length !== n) el.innerHTML = Array.from({ length: n }, (_, i) => `<i class="${i === 0 && n > 1 ? 'acc' : ''}"></i>`).join('');
+  [...el.children].forEach((x, i) => x.classList.toggle('on', i === b));
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && M.on) { stageArmed = false; metroStop(); } });
+function drawMetroBtns() {
+  const lbl = s => s && s.bpm ? 'Métronome · ' + s.bpm + ' BPM' + (s.sig ? ' · ' + s.sig : '') : 'Métronome';
+  const s = curSong(); if (s) $('#s-metro').textContent = lbl(s);
+  const c = curItem(); if (c) $('#it-metro').textContent = lbl(c.song);
+  const t = topNav();
+  if (t && t.v === 'stage') {
+    const sg = stageSong();
+    $('#st-metro').classList.toggle('hidden', !(sg && +sg.bpm));
+    $('#st-metro').classList.toggle('on', M.on && M.src === 'stage');
+    $('#st-metro').textContent = '♩ ' + ((sg && sg.bpm) || '');
+    if (!(M.on && M.src === 'stage')) $('#st-beat').innerHTML = '';
+  }
+}
+function metroSheet(song) {
+  if (!song) { toast('Ce chant n\'est plus dans la bibliothèque.'); return; }
+  const ed = canEdit(song.team);
+  let bpm = +song.bpm || 100;
+  const beats = beatsOf(song.sig);
+  const sh = sheet(`<p></p><div class="mbpm"><span class="v"></span><small>BPM · ${esc(song.sig || '4/4')}</small></div><div class="beats"></div>`
+    + '<div class="mrow"><button data-d="-5">−5</button><button data-d="-1">−1</button><button class="tap">Taper</button><button data-d="1">+1</button><button data-d="5">+5</button></div>'
+    + '<button class="ok mgo">Démarrer</button>' + (ed ? '<button class="alt save hidden">Enregistrer ce tempo dans la fiche</button>' : '') + '<button class="cancel">Fermer</button>');
+  sh.querySelector('p').textContent = 'Métronome — ' + (clean(song.title || '') || 'Chant');
+  const beatsEl = sh.querySelector('.beats');
+  const upd = () => {
+    sh.querySelector('.v').textContent = bpm;
+    const sv = sh.querySelector('.save'); if (sv) sv.classList.toggle('hidden', String(bpm) === String(song.bpm || ''));
+    sh.querySelector('.mgo').textContent = M.on && M.src === 'sheet' ? 'Arrêter' : 'Démarrer';
+  };
+  drawBeats(beatsEl, beats, -1); upd();
+  let taps = [];
+  sh.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.d) { bpm = Math.max(30, Math.min(300, bpm + +b.dataset.d)); M.bpm = bpm; }
+    else if (b.classList.contains('tap')) {
+      // Tempo au doigt : moyenne des derniers intervalles entre les touchers
+      const now = performance.now(); taps = taps.filter(x => now - x < 2500); taps.push(now);
+      if (taps.length >= 2) { const k = taps.slice(-5); bpm = Math.max(30, Math.min(300, Math.round(60000 * (k.length - 1) / (k[k.length - 1] - k[0])))); M.bpm = bpm; }
+    }
+    else if (b.classList.contains('mgo')) { if (M.on && M.src === 'sheet') metroStop(); else metroStart(bpm, beats, i => drawBeats(beatsEl, beats, i), 'sheet'); }
+    else if (b.classList.contains('save')) { edit('song', song, { bpm: String(bpm) }); toast('Tempo enregistré : ' + bpm + ' BPM'); render(); }
+    else return;
+    upd();
+  });
+  // Fermer la fenêtre arrête le métronome
+  const obs = new MutationObserver(() => { if (!sh.isConnected) { if (M.src === 'sheet') metroStop(); obs.disconnect(); } });
+  obs.observe(document.body, { childList: true });
+}
+$('#s-metro').onclick = () => metroSheet(curSong());
+$('#it-metro').onclick = () => { const c = curItem(); if (c) metroSheet(c.song); };
+// Mode scène : le métronome suit le chant affiché
+const stageSong = () => { const t = topNav(); if (!t || t.v !== 'stage') return null; const it = itemsOf(t.id)[t.i || 0]; return it ? songs.get(it.songId) : null; };
+// stageArmed : le métronome a été lancé en mode scène et pas arrêté → il reprend au tempo de
+// chaque chant (et se tait sur un chant sans tempo).
+let stageArmed = false;
+function stageMetroSync() {
+  if (stageArmed) {
+    const sg = stageSong(), bpm = sg && +sg.bpm, beats = beatsOf(sg && sg.sig);
+    if (!bpm) { if (M.on && M.src === 'stage') metroStop(); }
+    else if (!(M.on && M.src === 'stage') || bpm !== M.bpm || beats !== M.beats) metroStart(bpm, beats, i => drawBeats($('#st-beat'), beats, i), 'stage');
+  }
+  drawMetroBtns();
+}
+$('#st-metro').onclick = () => {
+  if (M.on && M.src === 'stage') { stageArmed = false; metroStop(); }
+  else { stageArmed = true; stageMetroSync(); }
+  drawMetroBtns();
+};
+
+// =====================================================================
+// =====================  Playlist YouTube  ============================
+// =====================================================================
+// YouTube crée une playlist temporaire à partir d'une liste de vidéos (sans compte ni clé).
+// On prend le premier lien YouTube de la fiche de chaque chant, dans l'ordre du set.
+function ytId(u) { const m = String(u || '').match(/(?:youtu\.be\/|[?&]v=|\/(?:embed|shorts|live|v)\/)([\w-]{11})(?![\w-])/); return m ? m[1] : null; }
+const songYt = song => { for (const u of String((song && song.links) || '').split(/\s+/)) { const id = ytId(u); if (id) return id; } return null; };
+const setYtIds = set => itemsOf(set.id).map(it => songYt(songs.get(it.songId))).filter(Boolean);
+const ytWatch = ids => 'https://www.youtube.com/watch_videos?video_ids=' + ids.join(',');
+function ytSheet(set) {
+  const sh = sheet('<p>Playlist YouTube</p><div class="ytframe"></div><small class="ys"></small><div class="ytlist"></div><button class="ok open">Ouvrir dans YouTube</button><button class="alt copy">Copier le lien de la playlist</button><button class="cancel">Fermer</button>');
+  let shown = null;
+  const draw = () => {
+    const rows = itemsOf(set.id).map(it => ({ it, song: songs.get(it.songId) })).map(r => ({ ...r, id: songYt(r.song) }));
+    const ids = rows.map(r => r.id).filter(Boolean);
+    const key = ids.join(',');
+    if (key !== shown) { // le lecteur n'est rechargé que si la liste change (la lecture continue sinon)
+      shown = key;
+      sh.querySelector('.ytframe').innerHTML = ids.length
+        ? `<iframe src="https://www.youtube-nocookie.com/embed/${ids[0]}?playlist=${ids.slice(1).join(',')}&rel=0&playsinline=1" title="Playlist YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`
+        : '';
+      sh.querySelector('.ytframe').classList.toggle('hidden', !ids.length);
+    }
+    sh.querySelector('.ys').textContent = ids.length === rows.length ? (ids.length ? ids.length + ' vidéos, dans l\'ordre du set' : 'Aucun chant dans ce set.')
+      : ids.length + ' vidéo' + (ids.length > 1 ? 's' : '') + ' sur ' + rows.length + ' chants : ajoute un lien YouTube aux autres.';
+    sh.querySelector('.open').classList.toggle('hidden', !ids.length);
+    sh.querySelector('.copy').classList.toggle('hidden', !ids.length);
+    html(sh.querySelector('.ytlist'), rows.map((r, i) => {
+      const title = itemTitle(r.it), q = encodeURIComponent([title, r.song && r.song.artist].filter(Boolean).join(' '));
+      return `<div class="ytrow" data-song="${esc(r.song ? r.song.id : '')}"><b>${i + 1}. ${esc(title)}</b>`
+        + (r.id ? '<span class="ok-y">✓ vidéo</span>' : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
+        + '</div>';
+    }).join(''));
+  };
+  draw();
+  sh.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const ids = setYtIds(set);
+    if (b.classList.contains('open')) window.open(ytWatch(ids), '_blank', 'noopener');
+    else if (b.classList.contains('copy')) { try { await navigator.clipboard.writeText(ytWatch(ids)); toast('Lien de la playlist copié'); } catch (er) { toast(ytWatch(ids)); } }
+    else if (b.classList.contains('add')) {
+      const row = b.closest('.ytrow'); if (row.querySelector('input')) return;
+      const inp = document.createElement('input'); inp.placeholder = 'Colle le lien YouTube du chant'; inp.setAttribute('inputmode', 'url');
+      row.append(inp); inp.focus();
+      inp.addEventListener('change', () => {
+        const song = songs.get(row.dataset.song), id = ytId(inp.value);
+        if (!song) return;
+        if (!id) { toast('Ce n\'est pas un lien YouTube.'); return; }
+        edit('song', song, { links: [clean(inp.value), song.links || ''].filter(Boolean).join('\n') });
+        shown = null; html(sh.querySelector('.ytlist'), ''); draw();
+        toast('Lien ajouté à la fiche du chant');
+      });
+    }
+  });
+}
+$('#set-yt').onclick = () => { const s = curSet(); if (s) ytSheet(s); };
 
 // ---------- Démarrage ----------
 await migrateLocal();

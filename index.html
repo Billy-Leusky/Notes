@@ -12,12 +12,12 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="theme-color" content="#f6f5f2">
 <title>Sets & Notes</title>
-<link rel="stylesheet" href="app.css?v=18">
+<link rel="stylesheet" href="app.css?v=19">
 </head>
 <body>
 <!-- ========== Accueil : onglets Sets / Chants / Notes ========== -->
 <section id="list" class="view">
-  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v18</span></p><button id="space" class="space hidden" type="button"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.8 5 5.8"/></svg><span></span><i>▾</i></button></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
+  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v19</span></p><button id="space" class="space hidden" type="button"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.8 5 5.8"/></svg><span></span><i>▾</i></button></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
   <button class="fab" id="new" aria-label="Nouveau"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -68,6 +68,7 @@
       <label>Mesure<select id="s-sig" class="fld"><option value="">—</option><option>4/4</option><option>3/4</option><option>6/8</option><option>12/8</option><option>2/4</option></select></label>
       <label>Durée<input id="s-dur" class="fld" inputmode="numeric" placeholder="4:30" autocomplete="off"></label>
     </div>
+    <button id="s-metro" class="metrobtn" type="button"></button>
     <label class="lbl">Style / feel<input id="s-style" class="fld" list="styles" placeholder="Gospel, ballade, pop…" autocomplete="off"></label>
     <h3>Structure</h3>
     <div id="s-struct"></div>
@@ -102,6 +103,7 @@
     <p id="set-mod" class="info mod"></p>
     <div class="setact">
       <button id="set-play" class="ok" type="button"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Mode scène</button>
+      <button id="set-yt" type="button"><svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"/></svg>YouTube</button>
       <button id="set-share" type="button"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>Partager</button>
     </div>
     <div id="set-items" class="items"></div>
@@ -121,6 +123,7 @@
   <div class="scroller form">
     <div class="ithead"><span id="it-num" class="num"></span><div><h2 id="it-title"></h2><button id="it-open" class="link" type="button">Voir la fiche du chant ›</button></div></div>
     <p id="it-info" class="info"></p>
+    <button id="it-metro" class="metrobtn" type="button"></button>
     <p id="it-mod" class="info mod"></p>
     <div class="fields two">
       <label>Tonalité du jour<button id="it-key" class="fld" type="button"></button></label>
@@ -142,6 +145,7 @@
   <div class="stbar">
     <button class="stq" data-back type="button"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Quitter</span></button>
     <div class="stset"><b id="st-set"></b><span id="st-pos"></span></div>
+    <button id="st-metro" class="stbtn hidden" type="button"></button>
     <button id="st-lead" class="stbtn hidden" type="button">Diriger</button>
     <button id="st-follow" class="stbtn hidden" type="button">Suivre</button>
   </div>
@@ -150,6 +154,7 @@
     <h1 id="st-title"></h1>
     <div class="stkeyrow"><span id="st-key" class="stkey"></span><span id="st-orig" class="storig"></span></div>
     <p id="st-meta" class="stmeta"></p>
+    <div id="st-beat" class="stbeat"></div>
     <div id="st-pills" class="stpills"></div>
     <p id="st-lead-name" class="stline"></p>
     <p id="st-note" class="stline stnote"></p>
@@ -167,6 +172,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="vendor/diff_match_patch.js?v=1"></script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>
