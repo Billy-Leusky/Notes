@@ -206,7 +206,7 @@ document.addEventListener('click', e => {
       if (part && r.official) f.official = false; // l'officiel est toujours un chant complet
       // Le titre suit la partie (« Oh Happy Day – C1 – 6 déc. » → « Oh Happy Day – C2 – 6 déc. »)
       let t = r.title || '';
-      if (r.part) t = t.replace(new RegExp(' – ' + r.part.replace(/[^\w]/g, '') + '( – |$)'), (m, sep) => sep ? ' – ' : '');
+      if (r.part) { const old = partLabel(r.part).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); t = t.replace(new RegExp(' – ' + old + '( – |$)'), (m, sep) => sep ? ' – ' : ''); }
       if (part) t = withPart(t, part);
       if (t !== r.title) f.title = t;
       edit('rec', r, f); refreshUI(true);
@@ -1401,7 +1401,7 @@ function renderRecs(host, parentId, suggest, extra = [], opts = {}) {
   // opts.st : structure (pour ranger les parties) ; opts.pick : chant du set (choix 🎧 de l'enregistrement écouté)
   const all = [...extra.filter(r => r && r.parentId !== parentId), ...recsOf(parentId)];
   const order = partsOf(opts.st);
-  const rank = r => r.part ? (order.includes(r.part) ? order.indexOf(r.part) : 999) : -1;
+  const rank = r => { if (!r.part) return -1; const f = partList(r.part)[0]; return (order.includes(f) ? order.indexOf(f) : 999) + partList(r.part).length / 100; };
   const list = all.map((r, i) => [r, i]).sort((a, b) => (rank(a[0]) - rank(b[0])) || (a[1] - b[1])).map(x => x[0]);
   const picked = opts.pick ? listenRecOf(opts.pick) : null;
   const ro = r => !(user && (r.owner === user.id || (!r.owner && !r.team))) && !canEdit(r.team) && r.team;
@@ -1426,9 +1426,8 @@ function renderRecs(host, parentId, suggest, extra = [], opts = {}) {
     // Partie (pastille) : touchée → changer la partie
     let pb = c.querySelector('.pbadge');
     if (!pb) { pb = document.createElement('button'); pb.type = 'button'; pb.className = 'pbadge'; c.querySelector('.nm').before(pb); }
-    pb.textContent = r.part || 'Complet';
+    pb.innerHTML = r.part ? partList(r.part).map(x => `<i style="--c:${partColor(x)}">${esc(x)}</i>`).join('') : 'Complet';
     pb.classList.toggle('full', !r.part);
-    pb.style.setProperty('--c', r.part ? partColor(r.part) : '#8a8a8e');
     // 🎧 : enregistrement complet écouté pour ce set
     let pk = c.querySelector('.pick');
     if (opts.pick && !r.part) {
@@ -1480,21 +1479,35 @@ function newRec(parentId, team, title, part) {
 const partsOf = st => [...new Set((st || []).map(secLabel))];
 const partColor = p => secColor(String(p || '').replace(/\d+$/, ''));
 const partName = p => { const t = String(p || '').replace(/\d+$/, ''), n = String(p || '').match(/\d+$/); return SEC[t] ? SEC[t][0] + (n ? ' ' + n[0] : '') : p; };
-// Fenêtre « Que vas-tu enregistrer ? » : chant complet ou une partie
+// Une ou plusieurs parties : enregistrées sous la forme « I+C1+C2 », affichées « I + C1 + C2 »
+const partList = p => String(p || '').split('+').filter(Boolean);
+const partLabel = p => partList(p).join(' + ');
+// Fenêtre « Que vas-tu enregistrer ? » : chant complet, ou une ou plusieurs parties (dans l'ordre de la structure)
 function partSheet(st, title, onPick, current) {
   const parts = partsOf(st);
-  if (current && current !== 'full' && !parts.includes(current)) parts.push(current);
-  const sh = sheet('<p></p><button class="ok full">Chant complet</button><small>' + (parts.length ? 'Ou une partie de la structure :' : 'Ajoute une structure au chant pour enregistrer par partie.') + '</small><div class="partgrid"></div><button class="cancel">Annuler</button>');
+  const sel = new Set(current && current !== 'full' ? partList(current) : []);
+  for (const p of sel) if (!parts.includes(p)) parts.push(p);
+  const sh = sheet('<p></p><button class="ok full">Chant complet</button><small>' + (parts.length ? 'Ou choisis une ou plusieurs parties, puis valide :' : 'Ajoute une structure au chant pour enregistrer par partie.') + '</small><div class="partgrid"></div><button class="ok okp">Valider</button><button class="cancel">Annuler</button>');
   sh.querySelector('p').textContent = title;
   sh.querySelector('.full').classList.toggle('cur', current === 'full');
-  sh.querySelector('.partgrid').innerHTML = parts.map(p => `<button data-part="${esc(p)}" class="${p === current ? 'cur' : ''}" style="--c:${partColor(p)}"><b>${esc(p)}</b><em>${esc(partName(p))}</em></button>`).join('');
+  sh.querySelector('.partgrid').innerHTML = parts.map(p => `<button data-part="${esc(p)}" style="--c:${partColor(p)}"><b>${esc(p)}</b><em>${esc(partName(p))}</em></button>`).join('');
+  const upd = () => {
+    sh.querySelectorAll('[data-part]').forEach(x => x.classList.toggle('cur', sel.has(x.dataset.part)));
+    const chosen = parts.filter(p => sel.has(p));
+    const ok = sh.querySelector('.okp');
+    ok.classList.toggle('hidden', !parts.length);
+    ok.disabled = !chosen.length;
+    ok.textContent = chosen.length ? 'Valider : ' + chosen.join(' + ') : 'Choisis au moins une partie';
+  };
+  upd();
   sh.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.classList.contains('full')) { sh.remove(); onPick(''); }
-    else if (b.dataset.part) { sh.remove(); onPick(b.dataset.part); }
+    else if (b.dataset.part) { sel.has(b.dataset.part) ? sel.delete(b.dataset.part) : sel.add(b.dataset.part); upd(); }
+    else if (b.classList.contains('okp') && sel.size) { sh.remove(); onPick(parts.filter(p => sel.has(p)).join('+')); }
   });
 }
-const withPart = (title, part) => part ? title.replace(/^([^–]+)( – |$)/, (m, a, sep) => a.trim() + ' – ' + part + (sep ? ' – ' : '')) : title;
+const withPart = (title, part) => part ? title.replace(/^([^–]+)( – |$)/, (m, a, sep) => a.trim() + ' – ' + partLabel(part) + (sep ? ' – ' : '')) : title;
 // Le bon enregistrement « complet » de répétition pour un chant d'un set : celui choisi (🎧),
 // sinon le dernier enregistré.
 const fullRecs = parentId => recsOf(parentId).filter(r => !r.part);

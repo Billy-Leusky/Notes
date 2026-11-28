@@ -353,3 +353,9 @@ textarea.fld{resize:vertical;line-height:1.4}
 .sheet .partgrid button b{color:var(--c);font-size:17px}
 .sheet .partgrid button em{font-style:normal;font-size:12px;color:var(--mute);font-weight:500}
 .sheet .partgrid button.cur,.sheet .full.cur{box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 40%,transparent)}
+.rec .pbadge{display:inline-flex;gap:3px;padding:0;background:none}
+.rec .pbadge i{--c:#888;font-style:normal;height:22px;padding:0 7px;border-radius:7px;background:var(--c);color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center}
+.rec .pbadge.full{padding:0 8px}
+.sheet .partgrid button.cur{background:var(--c);color:#fff}
+.sheet .partgrid button.cur b,.sheet .partgrid button.cur em{color:#fff}
+.sheet .okp:disabled{opacity:.45}
