@@ -59,7 +59,7 @@ async function renderNotes() {
   const q = $('#q').value.trim().toLowerCase();
   const list = notes.filter(n => !q || ((n.title || '') + ' ' + (n.text || '')).toLowerCase().includes(q));
   $('#count').textContent = notes.length + (notes.length > 1 ? ' notes' : ' note');
-  html($('#grid'), list.length ? list.map(n => `<button class="card" data-id="${esc(n.id)}"><b>${esc(n.title || 'Sans titre')}</b><span>${esc(n.text || '')}</span><small>${n.recs ? I.mic + esc(n.recs) + ' · ' : ''}${esc(new Date(n.edited || Date.now()).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }))}</small></button>`).join('')
+  html($('#grid'), list.length ? list.map(n => `<button class="card" data-id="${esc(n.id)}"><b>${esc(clean(n.title || '') || 'Sans titre')}</b><span>${esc(n.text || '')}</span><small>${n.recs ? I.mic + esc(n.recs) + ' · ' : ''}${esc(new Date(n.edited || Date.now()).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }))}</small></button>`).join('')
     : `<div class="empty">${q ? 'Aucun résultat' : 'Aucune note.<br>Touchez + pour commencer.'}</div>`);
 }
 $('#q').addEventListener('input', renderList);
@@ -74,7 +74,7 @@ async function openNote(n) {
   $('#date').textContent = dfmt(n.edited || Date.now());
   showView('editor');
   $('.scroller').scrollTop = 0;
-  if (!n.title && !n.html) setTimeout(() => $('#title').focus(), 50);
+  if (!n.title && !n.html) setTimeout(() => { const a = document.activeElement; if (cur === n && (!a || a === document.body)) $('#title').focus(); }, 50);
   for (const old of body.querySelectorAll('.rec')) {
     // Reconstruit le lecteur (met aussi à jour les anciens enregistrements sans titre)
     const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title);
@@ -91,14 +91,21 @@ function showList() {
 function sched() { dirty = touched = true; clearTimeout(saveT); saveT = setTimeout(save, 400); }
 async function save() {
   clearTimeout(saveT);
-  if (!cur || !dirty) return; dirty = false;
-  const a = body.cloneNode(true); a.querySelectorAll('.rec').forEach(resetChip);
+  if (!cur || !dirty) return;
+  captureNote();
+}
+// Contenu actuel de l'éditeur (lecteurs audio remis à zéro, pour comparer et enregistrer)
+function noteDomHtml() { const a = body.cloneNode(true); a.querySelectorAll('.rec').forEach(resetChip); return a.innerHTML; }
+function captureNote() {
+  clearTimeout(saveT);
+  if (!cur || $('#editor').classList.contains('hidden')) return;
+  dirty = false;
   const b = body.cloneNode(true); b.querySelectorAll('.rec').forEach(r => r.remove());
   b.querySelectorAll('div,p,li,br').forEach(e => e.before(' '));
   // Seuls les champs réellement modifiés sont horodatés (fusion champ par champ)
-  const v = { title: $('#title').value.trim(), html: a.innerHTML, text: b.textContent.replace(/\s+/g, ' ').trim(), recs: body.querySelectorAll('.rec').length };
+  const v = { title: $('#title').value, html: noteDomHtml(), text: b.textContent.replace(/\s+/g, ' ').trim(), recs: body.querySelectorAll('.rec').length };
   const f = {}; for (const k in v) if (cur[k] !== v[k]) f[k] = v[k];
-  if (!Object.keys(f).length && cur.ver) return;
+  if (!Object.keys(f).length) return;
   f.edited = Date.now();
   edit('note', cur, f);
   $('#date').textContent = dfmt(cur.edited);
@@ -123,7 +130,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { sav
 $('#back').onclick = async () => {
   if (rec) await stopRec();
   await save();
-  if (cur && !cur.title && !(cur.text || '').trim() && !cur.recs && !$('#title').value.trim() && !body.textContent.trim() && !body.querySelector('.rec')) await removeNote(cur, []);
+  if (cur && !clean(cur.title || '') && !(cur.text || '').trim() && !cur.recs && !$('#title').value.trim() && !body.textContent.trim() && !body.querySelector('.rec')) await removeNote(cur, []);
   cur = null; showList(); syncSoon(300);
 };
 $('#del').onclick = () => ask('Supprimer cette note ?', async () => {
@@ -448,7 +455,7 @@ function stopRec() {
 // gênent pas. Une suppression est définitive (« pierre tombale » deleted).
 const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 const KIND_STORE = { note: 'notes', song: 'songs', set: 'sets', item: 'items', rec: 'recs', pnote: 'pnotes' };
-const META = ['id', 'team', 'ver', 'dirty', 'deleted', 'seq', 'uid'];
+const META = ['id', 'team', 'ver', 'dirty', 'deleted', 'seq', 'uid', 'base'];
 const MEM = { song: songs, set: sets, item: items, rec: recDocs, pnote: pnotes };
 let user = null, clockOff = 0, syncing = null, syncT, pushT, pushing = null, pushAgain = false;
 let lastSync = 0, syncErr = '', audioErr = '';
@@ -456,6 +463,48 @@ const now = () => Date.now() + clockOff;
 const dataOf = o => { const d = {}; for (const k in o) if (!META.includes(k)) d[k] = o[k]; return d; };
 const memOf = (kind, id) => kind === 'note' ? (cur && cur.id === id ? cur : null) : (MEM[kind] && MEM[kind].get(id)) || null;
 const recIdsOf = html => { const t = document.createElement('template'); t.innerHTML = html || ''; return [...t.content.querySelectorAll('.rec')].map(r => r.dataset.id); };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Contenu d'un document (sans métadonnées ni horodatages)
+const fieldsOf = o => { const d = {}; for (const k in o) if (!META.includes(k) && k !== '_ts') d[k] = o[k]; return d; };
+// Fusion de texte à trois versions (comme les éditeurs collaboratifs) : on applique au texte local
+// les changements faits ailleurs depuis la version commune « base ». Les deux saisies sont gardées.
+let dmp = null;
+function merge3(base, local, remote) {
+  if (local === remote || remote === base) return local;
+  if (local === base) return remote;
+  if (!window.diff_match_patch) return remote;
+  dmp = dmp || new diff_match_patch();
+  dmp.Match_Threshold = 0.5; dmp.Match_Distance = 1000; dmp.Patch_DeleteThreshold = 0.5;
+  return dmp.patch_apply(dmp.patch_make(base, remote), local)[0];
+}
+// Fusionne la version du serveur r dans le document local o (qui a des modifications non envoyées).
+// Champ par champ : changé d'un seul côté → on garde ce changement ; texte changé des deux côtés →
+// fusion caractère par caractère ; autre valeur changée des deux côtés → la plus récente gagne.
+// Renvoie true s'il reste des différences locales à envoyer.
+// Textes libres fusionnés caractère par caractère ; les champs courts (titre de chant, artiste,
+// style, lead…) gardent la valeur la plus récente (fusionner « Pop » et « Gospel » n'aurait pas de sens).
+const MERGE_TEXT = { note: ['title', 'html', 'text'], song: ['notes', 'links'], set: ['notes'], item: ['note'], pnote: ['text'] };
+function mergeFields(o, r, kind) {
+  const base = o.base, ts = { ...(o._ts || {}) }, rts = r._ts || {};
+  const keys = new Set([...Object.keys(fieldsOf(o)), ...Object.keys(fieldsOf(r))]);
+  let differs = false;
+  for (const k of keys) {
+    const l = o[k], rv = r[k], b = base ? base[k] : undefined;
+    let v;
+    if (same(l, rv)) v = l;
+    else if (base && same(l, b)) v = rv;
+    else if (base && same(rv, b)) v = l;
+    else if (base && (MERGE_TEXT[kind] || []).includes(k) && typeof l === 'string' && typeof rv === 'string' && (b == null || typeof b === 'string')) v = merge3(b || '', l, rv);
+    else v = (rts[k] || 0) > (ts[k] || 0) ? rv : l;
+    if (v !== undefined) o[k] = v; else delete o[k];
+    ts[k] = Math.max(ts[k] || 0, rts[k] || 0);
+    if (!same(v, rv)) differs = true;
+  }
+  // Transfert vers une équipe pas encore envoyé : on le garde (et il reste à envoyer)
+  if (o.team && o.team !== r.team) differs = true; else o.team = r.team;
+  o._ts = ts; o.base = fieldsOf(r); o.ver = r.ver; o.uid = r.uid;
+  return differs;
+}
 const errText = e => (e && ((e.name && e.name !== 'Error' ? e.name + ' : ' : '') + (e.message || e.code || ''))) || String(e);
 
 // ---------- Écriture locale ----------
@@ -537,56 +586,97 @@ function legacyRec(r, parentId, row) {
   recDocs.set(o.id, o); storeLocal('rec', o);
 }
 const changedKinds = new Set(); let refreshT;
+// Documents en cours d'envoi : les versions reçues pendant l'envoi sont mises en attente et
+// appliquées après la réponse du serveur (sinon notre propre envoi, revenu par le temps réel
+// avant la confirmation, serait pris pour une modification d'ailleurs et fusionné deux fois).
+const sending = new Map();
 async function applyRow(row) {
   const kind = row.kind, st = KIND_STORE[kind]; if (!st || !row.id) return false;
+  if (sending.has(row.id)) { sending.get(row.id).push(row); return false; }
+  // Mot en cours de composition (clavier de téléphone) : on applique après sa validation
+  if (composing) { deferred.push(row); return false; }
   let o = memOf(kind, row.id) || await get(st, row.id);
   if (o && o.ver >= row.updated && !(row.deleted && !o.deleted)) return false; // déjà à jour
   const r = normalize(row);
-  let n;
-  if (!o || !o.dirty || r.deleted) n = { ...r, dirty: false, seq: o ? o.seq || 0 : 0 };
-  else {
-    // Modifié ici et ailleurs : champ par champ, le plus récent gagne ; on garde « dirty »
-    // pour renvoyer nos champs gagnants au serveur.
-    n = o; const ts = { ...(o._ts || {}) };
-    for (const k in r) {
-      if (META.includes(k) || k === '_ts') continue;
-      if ((r._ts[k] || 0) > (ts[k] || 0)) { n[k] = r[k]; ts[k] = r._ts[k]; if (kind === 'note' && n === cur && k === 'title') setV('#title', r[k]); }
-    }
-    n._ts = ts; n.ver = r.ver; n.team = r.team; n.uid = r.uid;
-  }
-  if (n.deleted) {
+  if (r.deleted) {
     if (o) for (const id of kind === 'rec' ? [o.id] : kind === 'note' ? recIdsOf(o.html) : []) delAudio(id);
     if (MEM[kind]) MEM[kind].delete(row.id);
     pend.delete(kind + ':' + row.id);
     await del(st, row.id);
     if (kind === 'note' && cur && cur.id === row.id) { cur = null; showList(); toast('Cette note a été supprimée sur un autre appareil.'); }
-  } else {
-    if (kind === 'note' && cur && cur.id === row.id && n !== cur) {
-      const before = cur.html, beforeT = cur.title;
-      for (const k of Object.keys(cur)) if (!(k in n)) delete cur[k];
-      Object.assign(cur, n); n = cur;
-      if (!touched && (before !== cur.html || beforeT !== cur.title)) refreshNoteEditor();
-    } else if (MEM[kind]) {
-      const m = MEM[kind].get(row.id);
-      if (m && m !== n) { for (const k of Object.keys(m)) if (!(k in n)) delete m[k]; Object.assign(m, n); n = m; }
-      else MEM[kind].set(row.id, n);
-    }
-    await put(st, n);
-    if (kind === 'rec' || (kind === 'note' && recIdsOf(n.html).length)) audioSoon();
+    changedKinds.add(kind); clearTimeout(refreshT); refreshT = setTimeout(refreshUI, 30);
+    return true;
   }
+  // Note ouverte : on prend d'abord en compte ce qui vient d'être tapé (pas encore enregistré)
+  if (kind === 'note' && cur && cur.id === row.id) { captureNote(); o = cur; }
+  else if (o && MEM[kind] && MEM[kind].get(row.id)) o = MEM[kind].get(row.id);
+  let n;
+  if (!o || !o.dirty) {
+    n = { ...r, base: fieldsOf(r), dirty: false, seq: o ? o.seq || 0 : 0 };
+    if (o) { for (const k of Object.keys(o)) if (!(k in n)) delete o[k]; Object.assign(o, n); n = o; }
+  } else {
+    n = o;
+    n.dirty = mergeFields(n, r, kind);
+    if (n.dirty) pushSoon(50);
+  }
+  if (MEM[kind] && !MEM[kind].has(row.id)) MEM[kind].set(row.id, n);
+  // Mise à jour de l'éditeur tout de suite, sans attente depuis la capture de la frappe :
+  // sinon une touche tapée pendant l'attente serait effacée par la mise à jour.
+  if (kind === 'note' && cur === n) refreshNoteEditor();
+  await put(st, n);
+  if (kind === 'rec' || (kind === 'note' && recIdsOf(n.html).length)) audioSoon();
   changedKinds.add(kind);
   clearTimeout(refreshT); refreshT = setTimeout(refreshUI, 30);
   return true;
 }
 // Note ouverte modifiée ailleurs (et pas en cours d'écriture ici) : on met à jour sans fermer
-async function refreshNoteEditor() {
+// Saisie en cours de composition (clavier Android, suggestions, accents) : on attend la fin du mot
+let composing = false, pendingRefresh = false, deferred = [];
+document.addEventListener('compositionstart', () => { composing = true; });
+document.addEventListener('compositionend', () => {
+  composing = false;
+  // Après l'événement « input » du mot validé (qui met à jour le document), on applique ce qui a été reçu
+  setTimeout(async () => {
+    const q = deferred; deferred = [];
+    for (const r of q) await applyRow(r);
+    if (pendingRefresh) { pendingRefresh = false; refreshNoteEditor(); refreshUI(true); }
+  }, 0);
+});
+function refreshNoteEditor() {
   if (!cur || $('#editor').classList.contains('hidden')) return;
-  const sc = $('.scroller').scrollTop;
+  if (composing) { pendingRefresh = true; return; }
   setV('#title', cur.title || '');
-  body.innerHTML = cur.html || '';
-  for (const old of body.querySelectorAll('.rec')) { const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title); old.replaceWith(c); loadAudio(c.dataset.id); }
+  if (noteDomHtml() !== (cur.html || '')) {
+    const focused = document.activeElement === body || body.contains(document.activeElement);
+    const sel = getSelection();
+    let off = null;
+    if (focused && sel.rangeCount && body.contains(sel.anchorNode)) { const r = document.createRange(); r.setStart(body, 0); r.setEnd(sel.anchorNode, sel.anchorOffset); off = r.toString().length; }
+    const oldText = body.textContent;
+    const playingId = playing && playing.chip.isConnected ? playing.chip.dataset.id : null;
+    body.innerHTML = cur.html || '';
+    for (const old of body.querySelectorAll('.rec')) {
+      if (old.dataset.id === playingId) { old.replaceWith(playing.chip); continue; }
+      const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title); old.replaceWith(c); loadAudio(c.dataset.id);
+    }
+    if (off != null) {
+      // Le curseur reste au même endroit du texte, décalé si du texte a été ajouté avant lui
+      dmp = dmp || (window.diff_match_patch ? new diff_match_patch() : null);
+      const pos = dmp ? dmp.diff_xIndex(dmp.diff_main(oldText, body.textContent), off) : off;
+      placeCaretAt(pos);
+    }
+  }
   $('#date').textContent = dfmt(cur.edited || Date.now());
-  $('.scroller').scrollTop = sc;
+}
+function placeCaretAt(pos) {
+  const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  let n, left = pos;
+  while ((n = w.nextNode())) {
+    if (n.parentNode.closest && n.parentNode.closest('.rec')) { left -= n.data.length; if (left < 0) left = 0; continue; }
+    if (left <= n.data.length) { caretAt(n, left); return; }
+    left -= n.data.length;
+  }
+  const r = document.createRange(); r.selectNodeContents(body); r.collapse(false);
+  getSelection().removeAllRanges(); getSelection().addRange(r); range = r.cloneRange();
 }
 
 // ---------- Envoi ----------
@@ -599,25 +689,40 @@ function push() {
     const todo = [];
     for (const [kind, st] of Object.entries(KIND_STORE)) for (const o of await all(st)) if (o.dirty) todo.push([kind, memOf(kind, o.id) || o]);
     for (const [kind, o] of todo) {
-      if (!o.dirty) continue;
-      const seq = o.seq;
-      if (kind === 'rec' && !o.owner) edit('rec', o, { owner: user.id });
-      await uploadAudio(kind, o);
-      const t0 = Date.now();
-      const { data: row, error } = await sb.rpc('merge_doc', { p_id: o.id, p_kind: kind, p_team: o.team || null, p_data: dataOf(o), p_deleted: !!o.deleted });
-      if (error) {
-        // Refus (droits) : on abandonne la modification locale et on reprend la version du serveur
-        if (/row-level security|permission|42501|23505|duplicate key/i.test(error.message + ' ' + error.code)) { await discard(kind, o); continue; }
-        throw error;
+      // Le serveur n'accepte l'envoi que s'il part de sa dernière version ; sinon on fusionne
+      // avec sa version actuelle et on renvoie (quelques essais au plus).
+      for (let attempt = 0; attempt < 6 && o.dirty; attempt++) {
+        if (kind === 'note' && cur === o) captureNote();
+        if (kind === 'rec' && !o.owner) edit('rec', o, { owner: user.id });
+        const seq = o.seq;
+        await uploadAudio(kind, o);
+        const t0 = Date.now();
+        sending.set(o.id, []);
+        let res, error;
+        try { ({ data: res, error } = await sb.rpc('cas_doc', { p_id: o.id, p_kind: kind, p_team: o.team || null, p_data: dataOf(o), p_expect: o.ver || 0, p_deleted: !!o.deleted })); }
+        catch (e) { error = e; }
+        const queued = sending.get(o.id) || []; sending.delete(o.id);
+        const replay = async () => { for (const q of queued) await applyRow(q); };
+        if (error) {
+          await replay();
+          // Refus (droits) : on abandonne la modification locale et on reprend la version du serveur
+          if (/row-level security|permission|42501|23505|duplicate key/i.test(error.message + ' ' + error.code)) { await discard(kind, o); break; }
+          throw error;
+        }
+        const row = res.row;
+        // Décalage d'horloge de cet appareil (pour horodater les champs à l'heure du serveur)
+        const off = row.updated - Math.round((t0 + Date.now()) / 2);
+        if (Math.abs(off - clockOff) > 1500) clockOff = off;
+        if (res.ok) {
+          if (o.deleted || row.deleted) { if (MEM[kind]) MEM[kind].delete(o.id); await del(KIND_STORE[kind], o.id); o.dirty = false; break; }
+          o.ver = row.updated; o.base = fieldsOf(normalize(row)); o.uid = row.user_id;
+          if (o.seq === seq) o.dirty = false;
+          await put(KIND_STORE[kind], o);
+        } else {
+          await applyRow(row); // conflit : fusion avec la version du serveur, puis nouvel essai
+        }
+        await replay();
       }
-      // Décalage d'horloge de cet appareil (pour horodater les champs à l'heure du serveur)
-      const off = row.updated - Math.round((t0 + Date.now()) / 2);
-      if (Math.abs(off - clockOff) > 1500) clockOff = off;
-      if (o.seq === seq) o.dirty = false;
-      if (o.deleted && !o.dirty) { await del(KIND_STORE[kind], o.id); continue; }
-      o.ver = Math.max(o.ver || 0, row.updated - 1);
-      await put(KIND_STORE[kind], o);
-      await applyRow(row);
     }
     lastSync = Date.now(); syncErr = '';
   })().catch(e => { syncErr = errText(e); console.warn('envoi', e); })
@@ -681,9 +786,12 @@ async function fetchMissingAudio() {
   }
 }
 function syncSoon(ms = 300) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(() => sync(), ms); }
+let wantFull = false;
 function sync(full) {
   if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
-  if (syncing) return syncing;
+  // Une synchro est déjà en cours : on en relance une complète juste après si besoin
+  // (ex. on vient de rejoindre une équipe : il faut récupérer tous ses documents)
+  if (syncing) { if (full) wantFull = true; return syncing.then(() => { if (wantFull) { wantFull = false; return sync(true); } }); }
   audioErr = '';
   syncing = (async () => { await push(); await pull(full); await push(); await fetchMissingAudio(); lastSync = Date.now(); syncErr = ''; })()
     .catch(e => { syncErr = errText(e); console.warn('sync', e); })
@@ -741,11 +849,18 @@ function cloudSheet() {
     const email = s.querySelector('.em').value.trim(), password = s.querySelector('.pw').value;
     if (!email || password.length < 6) { toast('E-mail et mot de passe (6 caractères min.) requis'); return; }
     b.disabled = true;
-    const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }) : await sb.auth.signInWithPassword({ email, password });
+    let { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } }) : await sb.auth.signInWithPassword({ email, password });
+    // Compte créé sans session (confirmation d'e-mail activée) ou création refusée parce que le
+    // compte existe déjà : on tente directement la connexion avec le même mot de passe.
+    if (b.classList.contains('up') && (error ? /registered|rate limit|security purposes/i.test(error.message || '') : !data.session)) {
+      const r = await sb.auth.signInWithPassword({ email, password });
+      if (!r.error) { data = r.data; error = null; }
+      else if (!error) error = r.error;
+    }
     b.disabled = false;
     if (error) {
       const m = error.message || '';
-      toast(/not confirmed/i.test(m) ? 'Adresse e-mail pas encore confirmée : ouvre le lien reçu par e-mail, puis touche « Se connecter ».'
+      toast(/not confirmed/i.test(m) ? 'Compte créé ! Ouvre le lien de confirmation reçu par e-mail (regarde aussi dans les spams), puis reviens ici et touche « Se connecter ».'
         : /rate limit|security purposes|after \d+ seconds/i.test(m) ? 'Trop de tentatives : attends une minute avant de réessayer.'
         : /Invalid login/i.test(m) ? 'E-mail ou mot de passe incorrect'
         : /registered/i.test(m) ? 'Ce compte existe déjà : touche « Se connecter »'
@@ -904,7 +1019,21 @@ function sheet(html) {
 // Remplace le contenu d'un élément seulement s'il a changé (pas de clignotement)
 function html(el, s) { if (el.__h !== s) { el.innerHTML = s; el.__h = s; } }
 // Écrit une valeur dans un champ seulement si elle a changé (le curseur ne saute pas pendant la saisie)
-function setV(sel, v) { const e = $(sel); v = v == null ? '' : String(v); if (e.value !== v) e.value = v; }
+function setV(sel, v) {
+  const e = typeof sel === 'string' ? $(sel) : sel;
+  v = v == null ? '' : String(v);
+  if (e.value === v) return;
+  if (composing && document.activeElement === e) { pendingRefresh = true; return; }
+  let st = null, en = null;
+  try { st = e.selectionStart; en = e.selectionEnd; } catch (er) {}
+  if (document.activeElement === e && typeof st === 'number' && window.diff_match_patch) {
+    // Texte modifié par quelqu'un d'autre pendant que j'écris : le curseur suit le texte
+    dmp = dmp || new diff_match_patch();
+    const diffs = dmp.diff_main(e.value, v);
+    e.value = v;
+    try { e.setSelectionRange(dmp.diff_xIndex(diffs, st), dmp.diff_xIndex(diffs, en)); } catch (er) {}
+  } else e.value = v;
+}
 const parseDur = v => { const m = String(v || '').trim().match(/^(\d{1,3})(?:\s*[:h'.,]\s*(\d{1,2}))?$/); return m ? (+m[1]) * 60 + (+(m[2] || 0)) : 0; };
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const dParse = iso => /^\d{4}-\d\d-\d\d$/.test(iso || '') ? new Date(iso + 'T12:00:00') : null;
@@ -943,7 +1072,7 @@ async function loadTeams(membership) {
   if (space && !teamOf(space)) { space = ''; setPref('space', ''); }
   // Équipes quittées : on retire leurs documents de cet appareil
   for (const kind of ['song', 'set', 'item', 'rec']) for (const o of [...MEM[kind].values()]) if (o.team && !teamOf(o.team)) { MEM[kind].delete(o.id); del(KIND_STORE[kind], o.id); }
-  if (membership && had !== teams.map(t => t.id).sort().join()) await sync(true);
+  if (membership && had !== teams.map(t => t.id).sort().join()) { live(); await sync(true); }
   refreshUI(true);
 }
 function spaceName(id) { return id ? (teamOf(id) || {}).name || 'Équipe' : 'Mon espace'; }
@@ -1059,7 +1188,7 @@ readJoinLink();
 addEventListener('hashchange', () => { if (readJoinLink()) checkPendingJoin(); });
 function checkPendingJoin() {
   const code = pref('pendingJoin', ''); if (!code) return;
-  if (!user) { toast('Connecte-toi (bouton nuage) pour rejoindre l\'équipe.'); return; }
+  if (!user) { if (!document.querySelector('.sheet')) cloudSheet(); toast('Pour rejoindre l\'équipe, crée ton compte (ou connecte-toi). L\'invitation s\'ouvrira ensuite.'); return; }
   setPref('pendingJoin', '');
   if (!teams.some(t => t.code === code)) teamForm('join', code);
 }
@@ -1479,6 +1608,10 @@ render();
 if (sb) {
   sb.auth.onAuthStateChange((ev, session) => {
     const was = user && user.id; user = session ? session.user : null;
+    // Lien d'invitation ouvert sans être connecté : on explique et on ouvre la connexion
+    if (!user && pref('pendingJoin', '') && !document.querySelector('.sheet')) {
+      setTimeout(() => { cloudSheet(); toast('Pour rejoindre l\'équipe, crée ton compte (ou connecte-toi). L\'invitation s\'ouvrira ensuite.'); }, 400);
+    }
     if ((user && user.id) === was) { syncUI(); return; }
     live();
     if (user) { loadTeams(true).then(() => { checkPendingJoin(); }); sync(true); }

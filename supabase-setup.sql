@@ -194,3 +194,33 @@ do $$ begin
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'teams') then alter publication supabase_realtime add table public.teams; end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'team_members') then alter publication supabase_realtime add table public.team_members; end if;
 end $$;
+
+-- ===== Envoi conditionnel (« compare-and-set ») utilisé par l'app =====
+-- L'écriture n'est acceptée que si le document n'a pas changé sur le serveur depuis la version sur
+-- laquelle l'appareil s'est basé (p_expect). Sinon rien n'est écrit et la version actuelle est
+-- renvoyée : l'appareil fusionne (texte caractère par caractère, autres champs par horodatage)
+-- puis renvoie. Ainsi, deux personnes qui écrivent en même temps ne s'écrasent jamais.
+create or replace function public.cas_doc(p_id text, p_kind text, p_team uuid, p_data jsonb, p_expect bigint, p_deleted boolean default false)
+returns jsonb language plpgsql security invoker set search_path = public
+as $$
+declare
+  d public.docs;
+  now_ms bigint := floor(extract(epoch from clock_timestamp()) * 1000);
+begin
+  select * into d from public.docs where id = p_id for update;
+  if not found then
+    insert into public.docs (id, team_id, kind, data, updated, deleted)
+    values (p_id, p_team, p_kind, p_data, now_ms, coalesce(p_deleted, false)) returning * into d;
+    return jsonb_build_object('ok', true, 'row', to_jsonb(d));
+  end if;
+  if d.updated <> coalesce(p_expect, 0) and not coalesce(p_deleted, false) then
+    return jsonb_build_object('ok', false, 'row', to_jsonb(d));
+  end if;
+  update public.docs set data = case when coalesce(p_deleted, false) then d.data else p_data end,
+    updated = greatest(now_ms, d.updated + 1),
+    deleted = d.deleted or coalesce(p_deleted, false), team_id = coalesce(p_team, d.team_id)
+  where id = p_id returning * into d;
+  return jsonb_build_object('ok', true, 'row', to_jsonb(d));
+end $$;
+revoke execute on function public.cas_doc(text, text, uuid, jsonb, bigint, boolean) from public, anon;
+grant execute on function public.cas_doc(text, text, uuid, jsonb, bigint, boolean) to authenticated;
