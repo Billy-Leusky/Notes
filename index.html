@@ -12,12 +12,12 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <meta name="theme-color" content="#f6f5f2">
 <title>Sets & Notes</title>
-<link rel="stylesheet" href="app.css?v=26">
+<link rel="stylesheet" href="app.css?v=27">
 </head>
 <body>
 <!-- ========== Accueil : onglets Sets / Chants / Notes ========== -->
 <section id="list" class="view">
-  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v26</span></p><button id="space" class="space hidden" type="button"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.8 5 5.8"/></svg><span></span><i>▾</i></button></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
+  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v27</span></p><button id="space" class="space hidden" type="button"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2c2.9.4 5 2.8 5 5.8"/></svg><span></span><i>▾</i></button></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
   <button class="fab" id="new" aria-label="Nouveau"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -72,6 +72,17 @@
     <label class="lbl">Style / feel<input id="s-style" class="fld" list="styles" placeholder="Gospel, ballade, pop…" autocomplete="off"></label>
     <h3>Structure</h3>
     <div id="s-struct"></div>
+    <h3>Paroles et accords</h3>
+    <div class="cpbox">
+      <p id="s-cpinfo" class="info"></p>
+      <div class="cpact">
+        <button id="s-cpview" type="button">Afficher</button>
+        <button id="s-cpedit" class="edit-only" type="button">Créer</button>
+        <button id="s-cpimp" class="edit-only" type="button">Importer un fichier</button>
+        <button id="s-cpexp" type="button">Exporter</button>
+      </div>
+      <input id="s-cpfile" type="file" accept=".cho,.chopro,.chordpro,.crd,.pro,.txt,text/plain" hidden>
+    </div>
     <h3>Versions YouTube</h3>
     <div id="s-vids" class="vids"></div>
     <div class="vadd edit-only"><input id="s-vurl" class="fld" placeholder="Coller un lien YouTube" inputmode="url" autocomplete="off"><input id="s-vlabel" class="fld" placeholder="Nom (ex. Live 2019)" autocomplete="off"><button id="s-vadd" type="button">Ajouter</button></div>
@@ -127,7 +138,7 @@
   <div class="scroller form">
     <div class="ithead"><span id="it-num" class="num"></span><div><h2 id="it-title"></h2><button id="it-open" class="link" type="button">Voir la fiche du chant ›</button></div></div>
     <p id="it-info" class="info"></p>
-    <button id="it-metro" class="metrobtn" type="button"></button>
+    <div class="recrow"><button id="it-metro" class="metrobtn" type="button"></button><button id="it-cp" class="metrobtn cpbtn" type="button">Paroles et accords</button></div>
     <p id="it-mod" class="info mod"></p>
     <div class="fields two">
       <label>Tonalité du jour<button id="it-key" class="fld" type="button"></button></label>
@@ -146,6 +157,43 @@
     <div class="recrow"><button class="recbtn" id="it-rec" type="button"><span class="rdot"></span>Enregistrer</button><button class="recbtn imp" id="it-imp" type="button">Importer un fichier audio</button></div>
     <input id="it-file" type="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac" hidden>
     <div id="it-mine" class="mine hidden"><h3>Mes notes perso <small>visibles par moi seul</small></h3><textarea id="it-pnote" class="fld" rows="2" placeholder="Ex. attention au break avant le refrain…"></textarea></div>
+  </div>
+</section>
+
+<!-- ========== Paroles et accords (ChordPro) ========== -->
+<section id="chords" class="view hidden">
+  <div class="bar">
+    <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Chant</span></button>
+    <span class="sp"></span>
+    <button class="ib edit-only" id="cp-editbtn" aria-label="Modifier"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/></svg></button>
+  </div>
+  <div class="cptools">
+    <div class="seg small"><button data-cpmode="lyrics">Paroles + accords</button><button data-cpmode="grid">Grille</button></div>
+    <div class="cpctl"><span>Ton</span><button data-tr="-1">−</button><b id="cp-tr"></b><button data-tr="1">+</button></div>
+    <div class="cpctl"><span>Capo</span><button data-capo="-1">−</button><b id="cp-capo"></b><button data-capo="1">+</button></div>
+    <div class="seg small"><button data-nt="en">C D E</button><button data-nt="fr">Do Ré Mi</button></div>
+    <div class="cpctl"><button data-fs="-1">A−</button><button data-fs="1">A+</button></div>
+  </div>
+  <div class="scroller">
+    <h2 id="cp-title"></h2>
+    <p id="cp-sub" class="info"></p>
+    <div id="cp-out" class="cpout"></div>
+  </div>
+</section>
+<section id="cpedit" class="view hidden">
+  <div class="bar">
+    <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Retour</span></button>
+    <span class="sp"></span>
+    <div class="seg small"><button data-cpe="text">Texte</button><button data-cpe="prev">Aperçu</button></div>
+  </div>
+  <div class="cpkeys">
+    <div class="cprow" id="cpe-secs"></div>
+    <div class="cprow" id="cpe-chords"></div>
+  </div>
+  <div class="scroller cpescroll">
+    <textarea id="cp-text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="Écris ici les paroles avec les accords entre crochets, ex. :&#10;{start_of_verse: Couplet 1}&#10;[G]Oh happy [C]day&#10;{end_of_verse}"></textarea>
+    <div id="cp-prev" class="cpout hidden"></div>
+    <p class="info cphelp">Accords entre crochets <b>[G]</b> ou <b>[Sol]</b> juste avant la syllabe. Sections : boutons ci-dessus. Enregistrement automatique.</p>
   </div>
 </section>
 
@@ -181,6 +229,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="vendor/diff_match_patch.js?v=1"></script>
-<script src="app.js?v=26"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>

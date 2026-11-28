@@ -2,8 +2,8 @@
 // - Fichiers de l'app : réseau d'abord (pour avoir la dernière version), sinon la copie gardée.
 // - Bibliothèque Supabase (version figée) : copie gardée d'abord.
 // - Données (Supabase) : jamais interceptées, l'app gère elle-même le hors-ligne.
-const CACHE = 'sets-v26';
-const CORE = ['./', './index.html', './app.css?v=26', './app.js?v=26', './vendor/diff_match_patch.js?v=1',
+const CACHE = 'sets-v27';
+const CORE = ['./', './index.html', './app.css?v=27', './app.js?v=27', './vendor/diff_match_patch.js?v=1',
   './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 const CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
 

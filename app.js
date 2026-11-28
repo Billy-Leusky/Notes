@@ -519,7 +519,7 @@ function merge3(base, local, remote) {
 // Renvoie true s'il reste des différences locales à envoyer.
 // Textes libres fusionnés caractère par caractère ; les champs courts (titre de chant, artiste,
 // style, lead…) gardent la valeur la plus récente (fusionner « Pop » et « Gospel » n'aurait pas de sens).
-const MERGE_TEXT = { note: ['title', 'html', 'text'], song: ['notes', 'links'], set: ['notes'], item: ['note'], pnote: ['text'] };
+const MERGE_TEXT = { note: ['title', 'html', 'text'], song: ['notes', 'links', 'chordpro'], set: ['notes'], item: ['note'], pnote: ['text'] };
 function mergeFields(o, r, kind) {
   const base = o.base, ts = { ...(o._ts || {}) }, rts = r._ts || {};
   const keys = new Set([...Object.keys(fieldsOf(o)), ...Object.keys(fieldsOf(r))]);
@@ -1309,7 +1309,7 @@ function refreshUI(force) {
 }
 
 // ---------- Navigation entre écrans ----------
-const VIEWS = ['list', 'editor', 'song', 'set', 'item', 'stage'];
+const VIEWS = ['list', 'editor', 'song', 'set', 'item', 'stage', 'chords', 'cpedit'];
 function showView(v) { VIEWS.forEach(x => $('#' + x).classList.toggle('hidden', x !== v)); }
 const topNav = () => nav[nav.length - 1];
 const scrollerOf = v => $('#' + v + ' .scroller') || $('#' + v + ' .stmain');
@@ -1331,15 +1331,15 @@ document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click'
 function render(fresh) {
   const t = topNav();
   if (!t) { showView('list'); renderTab(); return; }
-  const doc = t.v === 'song' ? songs.get(t.id) : sets.get(t.id);
+  const doc = ['song', 'chords', 'cpedit'].includes(t.v) ? songs.get(t.id) : sets.get(t.id);
   if (!doc) { nav.pop(); toast('Cet élément a été supprimé.'); return render(); }
   showView(t.v);
   const prev = nav[nav.length - 2];
-  if (t.v !== 'stage') $('#' + t.v + ' [data-back] span').textContent = !prev ? { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab] : { set: 'Set', song: 'Chant', item: 'Retour' }[prev.v];
+  if (t.v !== 'stage') $('#' + t.v + ' [data-back] span').textContent = !prev ? { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab] : { set: 'Set', song: 'Chant', item: 'Retour', chords: 'Accords', cpedit: 'Retour' }[prev.v] || 'Retour';
   const ed = canEdit(doc.team);
   $('#' + t.v).classList.toggle('ro', !ed);
   $('#' + t.v).querySelectorAll('.form input, .form textarea, .form select, .form .fld').forEach(e => { if (!e.closest('.mine')) e.disabled = !ed; });
-  ({ song: renderSong, set: renderSet, item: renderItem, stage: renderStage })[t.v](t);
+  ({ song: renderSong, set: renderSet, item: renderItem, stage: renderStage, chords: renderChords, cpedit: renderCpEdit })[t.v](t);
   if (fresh) scrollerOf(t.v).scrollTop = 0;
 }
 
@@ -1542,6 +1542,7 @@ function renderSong(t) {
   $('#s-mod').textContent = modLine(s);
   drawLinks(s); songSt.draw(); drawMetroBtns();
   renderRecs($('#s-recs'), s.id, songSuggest(s), [officialOf(s.id)], { st: s.struct });
+  drawCpInfo(s);
   drawVideos(s);
   drawPnote('#s-mine', '#s-pnote', s);
   const used = [...sets.values()].filter(x => itemsOf(x.id).some(i => i.songId === s.id)).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1686,6 +1687,8 @@ function renderItem() {
   $('#it-info').textContent = song ? [song.key && 'Tonalité d\'origine : ' + keyLabel(song.key), song.bpm && song.bpm + ' BPM', song.sig, song.style].filter(Boolean).join(' · ') : 'Ce chant a été supprimé de la bibliothèque.';
   $('#it-mod').textContent = modLine(it);
   drawItemKey(c); drawMetroBtns();
+  $('#it-cp').classList.toggle('hidden', !(song && clean(song.chordpro || '')));
+  if (song && song.chordpro) $('#it-cp').textContent = 'Paroles et accords' + (itemKey(it) ? ' · ' + keyLabel(itemKey(it)) : '');
   setV('#it-lead', it.lead || ''); setV('#it-note', it.note || '');
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
@@ -1705,7 +1708,7 @@ const itSt = structEditor($('#it-struct'), () => { const c = curItem(); return c
 $('#it-reset').onclick = () => { const c = curItem(); if (!c) return; edit('item', c.it, { struct: null }); itSt.draw(); $('#it-reset').classList.add('hidden'); };
 $('#it-key').onclick = () => {
   const c = curItem(); if (!c || !canEdit(c.it.team)) return;
-  keySheet(itemKey(c.it), k => { edit('item', c.it, { key: k && !(c.song && k === c.song.key) ? k : null }); drawItemKey(c); },
+  keySheet(itemKey(c.it), k => { edit('item', c.it, { key: k && !(c.song && k === c.song.key) ? k : null }); drawItemKey(c); render(); },
     c.song && c.song.key ? 'Comme le chant (' + keyLabel(c.song.key) + ')' : 'Aucune');
 };
 for (const [sel, f] of [['#it-lead', v => ({ lead: v })], ['#it-note', v => ({ note: v })]])
@@ -2386,6 +2389,280 @@ async function workSheet(id, title) {
   const obs = new MutationObserver(() => { if (!sh.isConnected) { a.pause(); cancelAnimationFrame(raf); obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 }
+
+
+// =====================================================================
+// =====================  Paroles et accords (ChordPro)  ===============
+// =====================================================================
+// Format ChordPro : accords entre crochets juste avant la syllabe ([G]Oh happy [C]day), directives
+// entre accolades ({title: …}, {key: …}, {start_of_verse: Couplet 1} … {end_of_verse}, {c: Intro}).
+// Les accords peuvent être écrits en notation anglaise (C, Am, F#7) ou française (Do, Lam, Fa#7).
+const NOTE_IDX = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11, Do: 0, Ré: 2, Re: 2, Mi: 4, Fa: 5, Sol: 7, La: 9, Si: 11 };
+const NAMES = {
+  en: { s: ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'], f: ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'] },
+  fr: { s: ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'], f: ['Do', 'Ré♭', 'Ré', 'Mi♭', 'Mi', 'Fa', 'Sol♭', 'Sol', 'La♭', 'La', 'Si♭', 'Si'] },
+};
+// Une note (« Sol# », « Bb », « Ré ») au début d'un texte → [n° de 0 à 11, longueur lue]
+function readNote(str) {
+  let m = str.match(/^(Do|Ré|Re|Mi|Sol|La|Si)/);
+  if (!m && /^Fa(?!dd|ug)/.test(str)) m = ['Fa'];
+  if (!m) m = str.match(/^[A-G]/);
+  if (!m) return null;
+  let i = NOTE_IDX[m[0]], len = m[0].length;
+  const acc = str.slice(len).match(/^(#|♯|b(?!5)|♭)/);
+  if (acc) { i += /#|♯/.test(acc[0]) ? 1 : -1; len += acc[0].length; }
+  return [(i + 12) % 12, len];
+}
+function parseChord(ch) {
+  const r = readNote(ch); if (!r) return null;
+  let rest = ch.slice(r[1]), bass = null;
+  const sl = rest.lastIndexOf('/');
+  if (sl >= 0) { const b = readNote(rest.slice(sl + 1)); if (b && b[1] === rest.length - sl - 1) { bass = b[0]; rest = rest.slice(0, sl); } }
+  return { root: r[0], rest, bass };
+}
+const keyIdx = k => { if (!k) return null; const r = parseChord(String(k).replace(/m$/, '')); return r ? r.root : null; };
+// Bémols pour les tonalités qui en utilisent (Fa, Si♭, Mi♭… et leurs relatives mineures)
+const useFlats = k => { if (!k) return false; const minor = /m$/.test(k), i = keyIdx(k); return minor ? [2, 7, 0, 5, 10, 3].includes(i) : [5, 10, 3, 8, 1, 6].includes(i) && !/#|♯/.test(k); };
+function showChord(ch, semis, flats) {
+  const c = parseChord(ch); if (!c) return ch; // texte non reconnu (N.C., x2…) : laissé tel quel
+  const N = NAMES[notation === 'fr' ? 'fr' : 'en'][flats ? 'f' : 's'];
+  const nm = i => N[((i + semis) % 12 + 12) % 12];
+  return nm(c.root) + c.rest + (c.bass != null ? '/' + nm(c.bass) : '');
+}
+// Nom de section → partie de la structure (Couplet 2 → C2, Chorus → R, Bridge → P…)
+const SEC_WORDS = [[/^(intro)/, 'I'], [/^(pre|pr[eé])[ -]?(refrain|chorus)/, 'PR'], [/^(couplet|verse|strophe|v)$|^(couplet|verse|strophe)/, 'C'], [/^(refrain|chorus|ref)/, 'R'], [/^(pont|bridge)/, 'P'],
+  [/^(instrumental|inst|solo)/, 'Inst'], [/^(interlude)/, 'Int'], [/^(tag)/, 'Tag'], [/^(vamp)/, 'Vamp'], [/^(outro|fin|ending|coda)/, 'Fin']];
+function sectionOf(name, env) {
+  const s = String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  const n = (s.match(/(\d+)/) || [])[1];
+  const w = s.replace(/[\d:.]/g, '').trim();
+  let t = null;
+  for (const [re, code] of SEC_WORDS) if (re.test(w)) { t = code; break; }
+  if (!t) t = { verse: 'C', chorus: 'R', bridge: 'P' }[env] || null;
+  return t ? { t, n: n ? +n : 0 } : null;
+}
+const isHeading = line => /^\s*(intro|couplet|verse|strophe|refrain|chorus|pont|bridge|pr[eé][ -]?(refrain|chorus)|outro|fin|ending|coda|solo|instrumental|interlude|tag|vamp)\s*\d*\s*:?\s*(x\s*\d+)?\s*$/i.test(line);
+// Lecture d'un texte ChordPro → { meta, sections: [{ label, name, lines }] }
+function parseChordPro(text) {
+  const meta = {}, sections = [];
+  let sec = null, verseN = 0, raw = false;
+  const open = (name, env) => {
+    const so = sectionOf(name, env);
+    if (so && so.t === 'C' && !so.n) so.n = ++verseN; else if (so && so.t === 'C') verseN = so.n;
+    sec = { label: so ? so.t + (so.n || '') : null, name: name || '', lines: [] };
+    sections.push(sec);
+  };
+  const push = l => { if (!sec) { sec = { label: null, name: '', lines: [] }; sections.push(sec); } sec.lines.push(l); };
+  const lines = [];
+  for (const l of String(text || '').replace(/\r/g, '').split('\n')) {
+    const m2 = l.match(/^\s*(\{[a-z_]+\s*(?::[^}]*)?\})\s*(\S.*)$/i);
+    if (m2) lines.push(m2[1], m2[2]); else lines.push(l);
+  }
+  for (const line of lines) {
+    const d = line.trim().match(/^\{\s*([a-z_]+)\s*(?::\s*(.*?))?\s*\}$/i);
+    if (d) {
+      const k = d[1].toLowerCase(); let v = (d[2] || '').trim();
+      const lab = v.match(/label\s*=\s*"([^"]*)"/i); if (lab) v = lab[1];
+      if (['title', 't'].includes(k)) meta.title = v;
+      else if (['subtitle', 'st', 'artist', 'composer'].includes(k)) meta.artist = meta.artist || v;
+      else if (k === 'key') meta.key = v;
+      else if (k === 'tempo') meta.tempo = v;
+      else if (k === 'time') meta.time = v;
+      else if (k === 'capo') meta.capo = v;
+      else if (/^(start_of_|so)(verse|chorus|bridge|v|c|b)$/.test(k)) { const env = { v: 'verse', c: 'chorus', b: 'bridge' }[k.replace(/^(start_of_|so)/, '')] || k.replace(/^(start_of_|so)/, ''); open(v || { verse: 'Couplet', chorus: 'Refrain', bridge: 'Pont' }[env], env); }
+      else if (/^(start_of_|so)(tab|grid|t|g)$/.test(k)) raw = true;
+      else if (/^(end_of_|eo)(tab|grid|t|g)$/.test(k)) raw = false;
+      else if (/^(end_of_|eo)/.test(k)) sec = null;
+      else if (['comment', 'c', 'comment_italic', 'ci', 'comment_box', 'cb', 'highlight'].includes(k)) { if (isHeading(v) || sectionOf(v)) open(v.replace(/:\s*$/, '')); else push({ type: 'cm', text: v }); }
+      else if (k === 'chorus') push({ type: 'cm', text: '(Refrain)' });
+      continue;
+    }
+    if (raw) { push({ type: 'raw', text: line }); continue; }
+    if (/^\s*#/.test(line)) continue; // commentaire ChordPro
+    if (isHeading(line) && !/\[/.test(line)) { open(line.trim().replace(/:\s*$/, '')); continue; }
+    if (!line.trim()) { push({ type: 'blank' }); continue; }
+    const segs = []; const re = /\[([^\]]*)\]/g; let last = 0, m, chord = null;
+    while ((m = re.exec(line))) { segs.push({ chord, text: line.slice(last, m.index) }); chord = m[1]; last = re.lastIndex; }
+    segs.push({ chord, text: line.slice(last) });
+    push({ type: 'ly', segs: segs.filter((x, i) => i > 0 || x.text) });
+  }
+  // lignes vides en trop au début / à la fin de chaque section
+  for (const s2 of sections) { while (s2.lines[0] && s2.lines[0].type === 'blank') s2.lines.shift(); while (s2.lines.length && s2.lines[s2.lines.length - 1].type === 'blank') s2.lines.pop(); }
+  return { meta, sections: sections.filter(x => x.lines.length || x.label) };
+}
+// Texte « accords au-dessus des paroles » → ChordPro (pour les fichiers qui ne sont pas en ChordPro)
+const isChordToken = w => /^[(|]*$/.test(w) || (parseChord(w.replace(/[()|]/g, '')) && /^[A-GDRMFSL][^\s]*$/.test(w) && w.replace(/[()|]/g, '').length <= 12 && !/^(La|Le|Les|Si|Sa|Mi|Do|Fa|Re|De|Des|Du|Sol)[a-zàâäéèêëïîôöùûüç]{2,}$/.test(w));
+function isChordLine(l) { const w = l.trim().split(/\s+/).filter(Boolean); return w.length > 0 && w.every(isChordToken) && w.some(x => parseChord(x.replace(/[()|]/g, ''))); }
+function toChordPro(text) {
+  if (/\[[^\]\s]{1,12}\]/.test(text) || /^\s*\{/m.test(text)) return text; // déjà du ChordPro
+  const L = String(text).replace(/\r/g, '').split('\n'), out = [];
+  for (let i = 0; i < L.length; i++) {
+    const l = L[i];
+    if (isChordLine(l)) {
+      const ch = []; const re = /\S+/g; let m; while ((m = re.exec(l))) ch.push([m.index, m[0]]);
+      const nx = L[i + 1];
+      if (nx != null && nx.trim() && !isChordLine(nx) && !isHeading(nx)) {
+        let ly = nx.padEnd(Math.max(...ch.map(c => c[0])) + 1, ' ');
+        for (const [pos, c] of ch.slice().reverse()) ly = ly.slice(0, pos) + '[' + c + ']' + ly.slice(pos);
+        out.push(ly.replace(/\s+$/, '')); i++;
+      } else out.push(ch.map(c => '[' + c[1] + ']').join(' '));
+    } else out.push(l);
+  }
+  return out.join('\n');
+}
+// Rendu : « lyrics » (paroles + accords) ou « grid » (grille d'accords par partie)
+function renderChordPro(text, opts) {
+  const { semis = 0, flats = false, mode = 'lyrics' } = opts || {};
+  const doc = parseChordPro(text);
+  if (!doc.sections.length) return '<p class="empty-st">Pas encore de paroles ni d\'accords.</p>';
+  const head = s => s.label || s.name ? `<div class="sec">${s.label ? `<span class="pill" style="--c:${secColor(s.label.replace(/\d+$/, ''))}">${esc(s.label)}</span>` : ''}${s.name ? `<span class="sn">${esc(s.name)}</span>` : ''}</div>` : '';
+  const C = ch => esc(showChord(ch, semis, flats));
+  return doc.sections.map(s => {
+    if (mode === 'grid') {
+      const rows = s.lines.filter(l => l.type === 'ly').map(l => l.segs.filter(x => x.chord).map(x => x.chord)).filter(r => r.length);
+      if (!rows.length && !s.label) return '';
+      return head(s) + (rows.length ? rows.map(r => `<div class="gl">${r.map(ch => `<b>${C(ch)}</b>`).join('')}</div>`).join('') : '<div class="cm">(sans accords)</div>');
+    }
+    return head(s) + s.lines.map(l => {
+      if (l.type === 'blank') return '<div class="ln"></div>';
+      if (l.type === 'cm') return `<div class="cm">${esc(l.text)}</div>`;
+      if (l.type === 'raw') return `<div class="raw">${esc(l.text)}</div>`;
+      if (!l.segs.some(x => x.chord)) return `<div class="ln">${esc(l.segs.map(x => x.text).join(''))}</div>`;
+      // ligne d'accords seuls (intro, pont instrumental…) : sur une seule ligne
+      if (l.segs.every(x => !x.text.trim())) return `<div class="ln co">${l.segs.filter(x => x.chord).map(x => `<span class="c">${C(x.chord)}</span>`).join('')}</div>`;
+      return `<div class="ln">${l.segs.map(x => `<span class="sg"><span class="c">${x.chord ? C(x.chord) : ''}</span><span class="l">${esc(x.text || (x.chord ? ' ' : ''))}</span></span>`).join('')}</div>`;
+    }).join('');
+  }).join('');
+}
+
+// ---------- Fiche du chant : bloc « Paroles et accords » ----------
+function drawCpInfo(s) {
+  const has = !!clean(s.chordpro || '');
+  const d = has ? parseChordPro(s.chordpro) : null;
+  $('#s-cpinfo').textContent = has ? d.sections.length + ' section' + (d.sections.length > 1 ? 's' : '') + ' · ' + [...new Set(d.sections.map(x => x.label).filter(Boolean))].join(' ') : 'Aucune grille pour l\'instant : crée-la dans l\'app ou importe un fichier ChordPro.';
+  $('#s-cpview').classList.toggle('hidden', !has);
+  $('#s-cpexp').classList.toggle('hidden', !has);
+  $('#s-cpedit').textContent = has ? 'Modifier' : 'Créer';
+}
+$('#s-cpview').onclick = () => { const s = curSong(); if (s) go('chords', { id: s.id }); };
+$('#s-cpedit').onclick = () => { const s = curSong(); if (s && canEdit(s.team)) go('cpedit', { id: s.id }); };
+$('#it-cp').onclick = () => { const c = curItem(); if (c && c.song) go('chords', { id: c.song.id, item: c.it.id }); };
+$('#s-cpimp').onclick = () => $('#s-cpfile').click();
+$('#s-cpfile').addEventListener('change', async () => {
+  const f = $('#s-cpfile').files && $('#s-cpfile').files[0]; $('#s-cpfile').value = '';
+  const s = curSong(); if (!f || !s) return;
+  if (f.size > 1024 * 1024) { toast('Fichier trop lourd pour une grille d\'accords.'); return; }
+  const text = toChordPro(await f.text());
+  const apply = () => {
+    const meta = parseChordPro(text).meta, fill = { chordpro: text };
+    // Les infos du fichier remplissent les champs encore vides de la fiche
+    if (meta.title && !clean(s.title || '')) fill.title = meta.title;
+    if (meta.artist && !clean(s.artist || '')) fill.artist = meta.artist;
+    if (meta.key && !s.key) { const k = parseChord(meta.key.replace(/m$/, '')); if (k) fill.key = ROOTS[k.root] + (/m$/.test(meta.key) ? 'm' : ''); }
+    if (meta.tempo && !s.bpm) fill.bpm = String(parseInt(meta.tempo, 10) || '');
+    if (meta.time && !s.sig && ['4/4', '3/4', '6/8', '12/8', '2/4'].includes(meta.time)) fill.sig = meta.time;
+    edit('song', s, fill); render();
+    toast('Paroles et accords importés' + (Object.keys(fill).length > 1 ? ' (fiche complétée)' : ''));
+  };
+  if (clean(s.chordpro || '')) ask('Remplacer les paroles et accords actuels par ce fichier ?', apply); else apply();
+});
+$('#s-cpexp').onclick = () => {
+  const s = curSong(); if (!s || !clean(s.chordpro || '')) return;
+  let text = s.chordpro;
+  if (!/^\s*\{\s*(title|t)\s*:/im.test(text)) text = [`{title: ${clean(s.title || 'Chant')}}`, s.artist && `{artist: ${clean(s.artist)}}`, s.key && `{key: ${s.key}}`, s.bpm && `{tempo: ${s.bpm}}`, s.sig && `{time: ${s.sig}}`].filter(Boolean).join('\n') + '\n\n' + text;
+  const name = (clean(s.title || '') || 'chant').replace(/[\/\\:*?"<>|]+/g, '-') + '.cho';
+  const f = new File([text], name, { type: 'text/plain' });
+  if (navigator.canShare && navigator.canShare({ files: [f] })) navigator.share({ files: [f] }).catch(() => download(f)); else download(f);
+};
+
+// ---------- Affichage ----------
+function cpState(t) {
+  const song = songs.get(t.id), it = t.item ? items.get(t.item) : null;
+  const doc = parseChordPro(song.chordpro || '');
+  const base = song.key || (doc.meta.key ? (() => { const k = parseChord(doc.meta.key.replace(/m$/, '')); return k ? ROOTS[k.root] + (/m$/.test(doc.meta.key) ? 'm' : '') : ''; })() : '');
+  const target = it ? itemKey(it) || base : base;
+  let auto = 0;
+  if (base && target && keyIdx(base) != null && keyIdx(target) != null) auto = (keyIdx(target) - keyIdx(base) + 12) % 12;
+  if (auto > 6) auto -= 12;
+  const tr = auto + (t.tr || 0), capo = t.capo || 0;
+  const minor = /m$/.test(base || target || '');
+  const sounding = base ? ROOTS[((keyIdx(base) + tr) % 12 + 12) % 12] + (minor ? 'm' : '') : '';
+  const shapes = base ? ROOTS[((keyIdx(base) + tr - capo) % 12 + 12) % 12] + (minor ? 'm' : '') : '';
+  return { song, it, base, tr, capo, sounding, shapes, semis: tr - capo, flats: useFlats(capo ? shapes : sounding || base) };
+}
+function renderChords(t) {
+  const st = cpState(t), mode = pref('cpMode', 'lyrics');
+  $('#cp-title').textContent = clean(st.song.title || '') || 'Chant';
+  $('#cp-sub').textContent = [st.song.artist,
+    st.sounding && 'Tonalité : ' + keyLabel(st.sounding) + (st.base && st.sounding !== st.base ? ' (orig. ' + keyLabel(st.base) + ')' : ''),
+    st.capo && 'Capo ' + st.capo + (st.shapes ? ' : accords joués en ' + keyLabel(st.shapes) : ''),
+    st.song.bpm && st.song.bpm + ' BPM'].filter(Boolean).join(' · ');
+  $('#cp-tr').textContent = (st.tr > 0 ? '+' : '') + st.tr;
+  $('#cp-capo').textContent = st.capo;
+  document.querySelectorAll('[data-cpmode]').forEach(b => b.classList.toggle('on', b.dataset.cpmode === mode));
+  document.querySelectorAll('#chords [data-nt]').forEach(b => b.classList.toggle('on', b.dataset.nt === notation));
+  $('#cp-out').style.setProperty('--cpfs', pref('cpSize', '17') + 'px');
+  $('#cp-editbtn').classList.toggle('hidden', !canEdit(st.song.team));
+  html($('#cp-out'), renderChordPro(st.song.chordpro || '', { semis: st.semis, flats: st.flats, mode }));
+}
+$('#chords').addEventListener('click', e => {
+  const b = e.target.closest('button'); const t = topNav(); if (!b || !t || t.v !== 'chords') return;
+  if (b.dataset.cpmode) setPref('cpMode', b.dataset.cpmode);
+  else if (b.dataset.tr) t.tr = (t.tr || 0) + +b.dataset.tr;
+  else if (b.dataset.capo) t.capo = Math.max(0, Math.min(11, (t.capo || 0) + +b.dataset.capo));
+  else if (b.dataset.nt) { notation = b.dataset.nt; setPref('notation', notation); }
+  else if (b.dataset.fs) setPref('cpSize', String(Math.max(12, Math.min(34, +pref('cpSize', '17') + 2 * b.dataset.fs))));
+  else if (b.id === 'cp-editbtn') return go('cpedit', { id: t.id });
+  else return;
+  render();
+});
+
+// ---------- Éditeur ----------
+const SEC_INS = [['I', 'Intro', null], ['C', 'Couplet', 'verse'], ['PR', 'Pré-refrain', null], ['R', 'Refrain', 'chorus'], ['P', 'Pont', 'bridge'], ['Inst', 'Instrumental', null], ['Tag', 'Tag', null], ['Fin', 'Fin', null]];
+function renderCpEdit(t) {
+  const s = songs.get(t.id);
+  if (!canEdit(s.team)) { nav.pop(); return render(); }
+  setV('#cp-text', s.chordpro || '');
+  const prev = t.prev === true;
+  document.querySelectorAll('[data-cpe]').forEach(b => b.classList.toggle('on', (b.dataset.cpe === 'prev') === prev));
+  $('#cp-text').classList.toggle('hidden', prev);
+  $('#cp-prev').classList.toggle('hidden', !prev);
+  $('.cpkeys').classList.toggle('hidden', prev);
+  if (prev) { $('#cp-prev').style.setProperty('--cpfs', pref('cpSize', '17') + 'px'); html($('#cp-prev'), renderChordPro(s.chordpro || '', { mode: pref('cpMode', 'lyrics'), flats: useFlats(s.key) })); }
+  html($('#cpe-secs'), SEC_INS.map(([c, name]) => `<button class="sb" data-sec="${c}" style="--c:${secColor(c)}" type="button">${name}</button>`).join(''));
+  // Accords de la tonalité du chant (degrés I à VI), plus des crochets vides
+  const k = s.key, i0 = keyIdx(k), minor = /m$/.test(k || '');
+  const degs = i0 == null ? [] : minor ? [[0, 'm'], [3, ''], [5, 'm'], [7, 'm'], [8, ''], [10, ''], [7, '']] : [[0, ''], [2, 'm'], [4, 'm'], [5, ''], [7, ''], [9, 'm'], [7, '7']];
+  const N = NAMES.en[useFlats(k) ? 'f' : 's'].map(x => x.replace('♯', '#').replace('♭', 'b'));
+  const chords = [...new Set(degs.map(([d, q]) => N[(i0 + d) % 12] + q))];
+  html($('#cpe-chords'), '<button class="chb" data-ins="[]" type="button">[ ]</button>' + chords.map(c => `<button class="chb" data-ins="[${c}]" type="button">${esc(showChord(c, 0, useFlats(k)))}</button>`).join(''));
+  if (t.focus) { t.focus = false; setTimeout(() => $('#cp-text').focus(), 60); }
+}
+$('#cp-text').addEventListener('input', () => { const t = topNav(); const s = t && songs.get(t.id); if (s) edit('song', s, { chordpro: $('#cp-text').value }); });
+function insertCp(txt, caretBack = 0) {
+  const ta = $('#cp-text'), a = ta.selectionStart || 0, b = ta.selectionEnd || 0;
+  ta.focus();
+  ta.setRangeText(txt, a, b, 'end');
+  if (caretBack) ta.selectionStart = ta.selectionEnd = ta.selectionStart - caretBack;
+  ta.dispatchEvent(new Event('input'));
+}
+$('.cpkeys').addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); }); // le clavier reste ouvert
+$('.cpkeys').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.ins) { insertCp(b.dataset.ins, b.dataset.ins === '[]' ? 1 : 0); return; }
+  const sec = SEC_INS.find(x => x[0] === b.dataset.sec); if (!sec) return;
+  const ta = $('#cp-text'), before = ta.value.slice(0, ta.selectionStart || 0);
+  const nl = before && !before.endsWith('\n') ? '\n' : '';
+  const [code, name, env] = sec;
+  let label = name;
+  if (code === 'C') label = 'Couplet ' + ((ta.value.match(/\{(start_of_verse|sov)\b/gi) || []).length + 1);
+  if (env) insertCp(`${nl}{start_of_${env}: ${label}}\n\n{end_of_${env}}\n`, `\n{end_of_${env}}\n`.length);
+  else insertCp(`${nl}{c: ${label}}\n`);
+});
+$('#cpedit').addEventListener('click', e => {
+  const b = e.target.closest('[data-cpe]'); const t = topNav(); if (!b || !t) return;
+  t.prev = b.dataset.cpe === 'prev'; render();
+});
 
 // ---------- Démarrage ----------
 await migrateLocal();

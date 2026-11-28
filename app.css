@@ -373,3 +373,41 @@ textarea.fld{resize:vertical;line-height:1.4}
 .sheet .speeds{flex-wrap:wrap}
 .sheet .speeds button{min-width:52px;font-size:14px}
 .sheet .mrow button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+
+/* ---------- Paroles et accords (ChordPro) ---------- */
+.cpbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.cpbox .info{margin:0 0 8px}
+.cpact{display:flex;flex-wrap:wrap;gap:6px}
+.cpact button{height:38px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);font-weight:600;font-size:14px;color:var(--ink)}
+.cpact button:first-child{background:var(--acc);border-color:var(--acc);color:#fff}
+.metrobtn.cpbtn::before{-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 18V5l11-2v13' stroke='black' stroke-width='2' fill='none'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='17' cy='16' r='3'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 18V5l11-2v13' stroke='black' stroke-width='2' fill='none'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='17' cy='16' r='3'/%3E%3C/svg%3E") center/contain no-repeat}
+.cptools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:4px 12px 8px;border-bottom:1px solid var(--line)}
+.seg.small{display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg.small button{height:34px;padding:0 10px;font-size:13px;font-weight:600;background:var(--card);color:var(--ink)}
+.seg.small button.on{background:var(--acc);color:#fff}
+.cpctl{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--mute)}
+.cpctl button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-weight:700;color:var(--ink)}
+.cpctl b{min-width:30px;text-align:center;color:var(--ink);font-size:14px}
+.cpout{--cpfs:17px;font-size:var(--cpfs);line-height:1.35;padding-bottom:40px}
+.cpout .sec{margin:16px 0 4px;display:flex;align-items:center;gap:8px}
+.cpout .sec .pill{font-size:.8em}
+.cpout .sec .sn{color:var(--mute);font-size:.8em;font-weight:600}
+.cpout .ln{margin:2px 0;min-height:1.2em}
+.cpout .sg{display:inline-flex;flex-direction:column;vertical-align:bottom}
+.cpout .sg .c{font-weight:700;color:var(--acc);padding-right:.45em;min-height:1.25em;white-space:nowrap}
+.cpout .sg .l{white-space:pre}
+.cpout .cm{color:var(--mute);font-style:italic;margin:6px 0}
+.cpout .raw{font-family:ui-monospace,Menlo,monospace;white-space:pre;overflow-x:auto;font-size:.85em}
+.cpout .gl{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+.cpout .gl b{min-width:3.2em;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);text-align:center;color:var(--ink)}
+.cpout .empty-st{font-size:15px}
+.cpkeys{padding:6px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.cprow{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.cprow button{flex:none;height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--line);background:var(--card);font-size:14px;font-weight:600;color:var(--ink);white-space:nowrap}
+.cprow button.sb{--c:#888;border:2px solid var(--c);color:var(--c)}
+.cprow button.chb{color:var(--acc)}
+.cpescroll{padding-top:10px}
+#cp-text{width:100%;min-height:60vh;border:1px solid var(--line);border-radius:12px;padding:12px;font:15px/1.5 ui-monospace,Menlo,monospace;background:var(--card);color:var(--ink);resize:vertical;outline:0}
+.cphelp{font-size:13px}
+.cpout .ln.co{display:flex;flex-wrap:wrap;gap:.2em 1.1em}
+.cpout .ln.co .c{font-weight:700;color:var(--acc)}
