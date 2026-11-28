@@ -330,7 +330,11 @@ function recFiles(c) {
   const type = baseType(blob.type);
   const base = ((c.dataset.title || 'Enregistrement').replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement');
   const opts = /webm/.test(type) ? [['audio/webm', 'webm'], ['audio/webm', 'weba'], ['video/webm', 'webm']]
-    : /ogg/.test(type) ? [['audio/ogg', 'ogg']]
+    : /ogg|opus/.test(type) ? [['audio/ogg', 'ogg']]
+    : /mpeg|mp3/.test(type) ? [['audio/mpeg', 'mp3'], ['audio/mp3', 'mp3']]
+    : /wav/.test(type) ? [['audio/wav', 'wav'], ['audio/x-wav', 'wav']]
+    : /flac/.test(type) ? [['audio/flac', 'flac']]
+    : /aac/.test(type) ? [['audio/aac', 'aac'], ['audio/x-m4a', 'm4a']]
     : [['audio/mp4', 'm4a'], ['audio/x-m4a', 'm4a'], ['video/mp4', 'mp4']];
   return opts.map(([t, ext]) => new File([blob], base + '.' + ext, { type: t }));
 }
@@ -1950,103 +1954,164 @@ function loadYtApi() {
   });
   return ytApi;
 }
-function ytSheet(set) {
-  const sh = sheet('<p>Playlist YouTube</p><div class="ytframe"><div class="ytp"></div></div><small class="ys"></small><div class="ytlist"></div><button class="ok open">Ouvrir dans YouTube</button><button class="alt copy">Copier le lien de la playlist</button><button class="cancel">Fermer</button>');
-  let cur = 0, player = null, ready = false, fallback = false, fbShown = null;
-  const bad = new Set(); // vidéos dont la lecture est interdite hors de YouTube
-  const rowsOf = () => itemsOf(set.id).map(it => ({ it, song: songs.get(it.songId) })).map(r => ({ ...r, id: songYt(r.song) }));
-  const idsOf = () => rowsOf().map(r => r.id).filter(Boolean);
-  const box = sh.querySelector('.ytframe');
-  // Lance la vidéo n° i de la liste (dans l'ordre du set)
-  function playAt(i, autoplay) {
-    const ids = idsOf(); if (!ids.length) return;
-    cur = Math.max(0, Math.min(i, ids.length - 1));
-    if (player && ready) { autoplay === false ? player.cueVideoById(ids[cur]) : player.loadVideoById(ids[cur]); }
-    else if (fallback) {
-      const key = ids.join(',') + '@' + cur;
-      if (key !== fbShown) {
-        fbShown = key;
-        box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${ids[cur]}?rel=0&playsinline=1${autoplay === false ? '' : '&autoplay=1'}" title="Vidéo YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`;
+// =====================================================================
+// =====================  Écouter le set  ==============================
+// =====================================================================
+// Pour chaque chant : enregistrement de répétition (fait dans ce set), enregistrement de
+// référence (fiche du chant) et/ou vidéo YouTube. La lecture enchaîne les chants dans l'ordre du
+// set ; « Enregistrements » ou « YouTube » indique la version jouée en priorité.
+// Les enregistrements sont lus depuis l'appareil : sans pub et même sans Internet.
+const SRC_NAME = { rep: 'Répétition', ref: 'Référence', yt: 'YouTube' };
+function listenSheet(set) {
+  let mode = pref('listenMode', 'rec');
+  const sh = sheet('<p>Écouter le set</p><div class="seg"><button data-m="rec">Enregistrements</button><button data-m="yt">YouTube</button></div>'
+    + '<div class="ytframe hidden"><div class="ytp"></div></div>'
+    + '<div class="aplayer hidden"><button class="apl" type="button" aria-label="Lecture / pause"></button><div class="amid"><b class="at"></b><span class="abar"><i></i></span></div><span class="atime"></span></div>'
+    + '<small class="ys"></small><div class="ytlist"></div><button class="alt open">Ouvrir la playlist dans YouTube</button><button class="alt copy">Copier le lien de la playlist YouTube</button><button class="cancel">Fermer</button>');
+  const box = sh.querySelector('.ytframe'), ap = sh.querySelector('.aplayer');
+  let cur = -1, curKind = null, player = null, ready = false, fallback = false, fbShown = null, pendingYt = null;
+  const bad = new Set(), missing = new Set();
+  const audio = new Audio(); audio.preload = 'auto';
+  const entries = () => itemsOf(set.id).map(it => {
+    const song = songs.get(it.songId);
+    return { it, song, rep: recsOf(it.id).slice(-1)[0] || null, ref: song ? recsOf(song.id).slice(-1)[0] || null : null, yt: songYt(song) };
+  });
+  // Versions jouables d'un chant, dans l'ordre de préférence
+  const sources = e => {
+    const recs = [e.rep && !missing.has(e.rep.id) && { k: 'rep', rec: e.rep }, e.ref && !missing.has(e.ref.id) && { k: 'ref', rec: e.ref }].filter(Boolean);
+    const y = e.yt && !bad.has(e.yt) ? [{ k: 'yt', id: e.yt }] : [];
+    return mode === 'yt' ? [...y, ...recs] : [...recs, ...y];
+  };
+  // Les enregistrements sont préparés dès l'ouverture (lecture immédiate au toucher)
+  for (const e of entries()) for (const r of [e.rep, e.ref]) if (r) loadAudio(r.id);
+  const stopAll = () => { audio.pause(); try { if (player && ready) player.pauseVideo(); } catch (er) {} };
+  function play(i, k) {
+    const es = entries();
+    if (i < 0 || i >= es.length) { stopAll(); cur = -1; curKind = null; draw(); return; }
+    const list = sources(es[i]);
+    const src = (k && list.find(x => x.k === k)) || list[0];
+    if (!src) return play(i + 1, null); // rien à écouter pour ce chant : on passe au suivant
+    cur = i; curKind = src.k; stopAll();
+    if (src.k === 'yt') { ap.classList.add('hidden'); box.classList.remove('hidden'); ytPlay(src.id); }
+    else {
+      box.classList.add('hidden'); ap.classList.remove('hidden');
+      const url = urls[src.rec.id];
+      if (!url) {
+        // Audio pas encore sur cet appareil : on le récupère, sinon on passe à la version suivante
+        missing.add(src.rec.id); draw();
+        if (user) fetchMissingAudio().then(() => loadAudio(src.rec.id)).then(() => { if (urls[src.rec.id]) { missing.delete(src.rec.id); if (cur === i) play(i, src.k); } });
+        return play(i, null);
       }
+      audio.src = url; audio.currentTime = 0;
+      audio.play().catch(() => { toast('Touche ▶ pour lancer la lecture.'); });
+      sh.querySelector('.at').innerHTML = esc(itemTitle(es[i].it)) + ' <em>· ' + SRC_NAME[src.k] + '</em>';
     }
     draw();
   }
-  function next() {
-    const ids = idsOf();
-    let n = cur + 1;
-    while (n < ids.length && bad.has(ids[n])) n++;
-    if (n < ids.length) playAt(n, true);
+  const next = () => play(cur + 1, null);
+  audio.addEventListener('ended', next);
+  audio.addEventListener('play', () => drawAp()); audio.addEventListener('pause', () => drawAp());
+  audio.addEventListener('timeupdate', () => drawAp());
+  function drawAp() {
+    sh.querySelector('.apl').innerHTML = audio.paused ? I.play : I.pause;
+    const d = audio.duration || 0;
+    sh.querySelector('.abar i').style.width = d ? Math.min(100, audio.currentTime / d * 100) + '%' : '0';
+    sh.querySelector('.atime').textContent = fmt(audio.currentTime) + (d && isFinite(d) ? ' / ' + fmt(d) : '');
   }
-  function makePlayer() {
-    const ids = idsOf(); if (!ids.length) return;
+  sh.querySelector('.apl').onclick = () => { if (audio.paused) audio.play().catch(() => {}); else audio.pause(); };
+  sh.querySelector('.abar').onclick = e => { const r = e.currentTarget.getBoundingClientRect(); if (audio.duration) audio.currentTime = (e.clientX - r.left) / r.width * audio.duration; };
+  // Lecteur YouTube piloté par l'app (interface officielle) ; lecteur simple si elle ne se charge pas
+  function ytPlay(id) {
+    if (player && ready) { player.loadVideoById(id); return; }
+    if (fallback) {
+      if (fbShown !== id) { fbShown = id; box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?rel=0&playsinline=1&autoplay=1" title="Vidéo YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`; }
+      return;
+    }
+    pendingYt = id;
+    if (player) return; // en cours de création : la vidéo sera lancée quand il sera prêt
     loadYtApi().then(YT => {
       if (!sh.isConnected || player) return;
       player = new YT.Player(sh.querySelector('.ytp'), {
-        host: 'https://www.youtube-nocookie.com', videoId: ids[cur], width: '100%', height: '100%',
-        playerVars: { playsinline: 1, rel: 0 },
+        host: 'https://www.youtube-nocookie.com', videoId: pendingYt, width: '100%', height: '100%',
+        playerVars: { playsinline: 1, rel: 0, autoplay: 1 },
         events: {
-          onReady: () => { ready = true; },
+          onReady: () => { ready = true; if (pendingYt) { try { player.loadVideoById(pendingYt); } catch (er) {} } },
           onStateChange: e => { if (e.data === YT.PlayerState.ENDED) next(); },
-          onError: () => { const id = idsOf()[cur]; if (id) bad.add(id); draw(); setTimeout(next, 600); },
+          onError: () => { const e = entries()[cur]; if (e && e.yt) bad.add(e.yt); setTimeout(() => play(cur, null), 500); },
         },
       });
-    }).catch(() => { fallback = true; playAt(cur, false); });
+    }).catch(() => { fallback = true; if (curKind === 'yt') ytPlay(pendingYt); });
   }
   const draw = () => {
-    const rows = rowsOf(), ids = rows.map(r => r.id).filter(Boolean);
-    if (cur >= ids.length) cur = 0;
-    box.classList.toggle('hidden', !ids.length);
-    sh.querySelector('.ys').textContent = ids.length === rows.length ? (ids.length ? ids.length + ' vidéos, dans l\'ordre du set · touche un chant pour le lancer' : 'Aucun chant dans ce set.')
-      : ids.length + ' vidéo' + (ids.length > 1 ? 's' : '') + ' sur ' + rows.length + ' chants : ajoute un lien YouTube aux autres.';
-    sh.querySelector('.open').classList.toggle('hidden', !ids.length);
-    sh.querySelector('.copy').classList.toggle('hidden', !ids.length);
-    let vi = -1;
-    html(sh.querySelector('.ytlist'), rows.map((r, i) => {
-      const title = itemTitle(r.it), q = encodeURIComponent([title, r.song && r.song.artist].filter(Boolean).join(' '));
-      if (r.id) vi++;
-      const isCur = r.id && vi === cur, isBad = r.id && bad.has(r.id);
-      return `<div class="ytrow${r.id ? ' play' : ''}${isCur ? ' cur' : ''}" data-song="${esc(r.song ? r.song.id : '')}"${r.id ? ` data-vi="${vi}" role="button" tabindex="0"` : ''}><b>${i + 1}. ${esc(title)}</b>`
-        + (r.id ? (isBad ? `<span class="no-y">lecture interdite ici</span><a href="https://www.youtube.com/watch?v=${r.id}" target="_blank" rel="noopener">Voir sur YouTube</a>` : `<span class="ok-y">${isCur ? '▶ en cours' : '▶ lire'}</span>`)
-          : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
-        + '</div>';
+    sh.querySelectorAll('[data-m]').forEach(x => x.classList.toggle('on', x.dataset.m === mode));
+    const es = entries(), withRec = es.filter(e => e.rep || e.ref).length, withYt = es.filter(e => e.yt).length;
+    sh.querySelector('.ys').textContent = !es.length ? 'Aucun chant dans ce set.'
+      : es.length + ' chants · ' + withRec + ' avec enregistrement · ' + withYt + ' avec YouTube · touche un chant pour le lancer';
+    const ytIds = setYtIds(set);
+    sh.querySelector('.open').classList.toggle('hidden', !ytIds.length);
+    sh.querySelector('.copy').classList.toggle('hidden', !ytIds.length);
+    html(sh.querySelector('.ytlist'), es.map((e, i) => {
+      const isCur = i === cur, title = itemTitle(e.it), q = encodeURIComponent([title, e.song && e.song.artist].filter(Boolean).join(' '));
+      const btn = (k, ok, off) => ok ? `<button class="src${isCur && curKind === k ? ' on' : ''}${off ? ' off' : ''}" data-k="${k}" type="button">${isCur && curKind === k ? '▶ ' : ''}${SRC_NAME[k]}</button>` : '';
+      const srcs = btn('rep', e.rep, e.rep && missing.has(e.rep.id)) + btn('ref', e.ref, e.ref && missing.has(e.ref.id)) + btn('yt', e.yt, e.yt && bad.has(e.yt));
+      const editable = e.song && canEdit(e.song.team);
+      return `<div class="lrow${isCur ? ' cur' : ''}" data-i="${i}" data-song="${esc(e.song ? e.song.id : '')}"><b>${i + 1}. ${esc(title)}</b><span class="srcs">${srcs || '<span class="none">rien à écouter</span>'}`
+        + (!e.yt ? `<a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher sur YouTube</a>${editable ? '<button class="add" type="button">Coller un lien</button>' : ''}` : '')
+        + '</span></div>';
     }).join(''));
   };
   draw();
-  makePlayer();
   sh.addEventListener('click', async e => {
-    // Toucher un chant de la liste : sa vidéo démarre, puis la suite du set
-    const row = e.target.closest('.ytrow.play');
-    if (row && !e.target.closest('a,button,input')) {
-      playAt(+row.dataset.vi, true);
-      box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      return;
-    }
-    const b = e.target.closest('button'); if (!b) return;
-    const ids = idsOf();
-    if (b.classList.contains('open')) { if (player && ready && player.pauseVideo) player.pauseVideo(); window.open(ytWatch(ids.slice(cur)), '_blank', 'noopener'); }
+    const b = e.target.closest('button'), row = e.target.closest('.lrow');
+    if (b && b.dataset.m) { mode = b.dataset.m; setPref('listenMode', mode); draw(); return; }
+    if (b && b.dataset.k && row) { play(+row.dataset.i, b.dataset.k); return; }
+    if (row && !b && !e.target.closest('a,input')) { play(+row.dataset.i, null); return; }
+    if (!b) return;
+    const ids = setYtIds(set);
+    if (b.classList.contains('open')) { stopAll(); window.open(ytWatch(ids), '_blank', 'noopener'); }
     else if (b.classList.contains('copy')) { try { await navigator.clipboard.writeText(ytWatch(ids)); toast('Lien de la playlist copié'); } catch (er) { toast(ytWatch(ids)); } }
-    else if (b.classList.contains('add')) {
-      const row = b.closest('.ytrow'); if (row.querySelector('input')) return;
+    else if (b.classList.contains('add') && row) {
+      if (row.querySelector('input')) return;
       const inp = document.createElement('input'); inp.placeholder = 'Colle le lien YouTube du chant'; inp.setAttribute('inputmode', 'url');
       row.append(inp); inp.focus();
       inp.addEventListener('change', () => {
         const song = songs.get(row.dataset.song), id = ytId(inp.value);
         if (!song) return;
         if (!id) { toast('Ce n\'est pas un lien YouTube.'); return; }
-        const playing = idsOf()[cur];
         edit('song', song, { links: [clean(inp.value), song.links || ''].filter(Boolean).join('\n') });
-        cur = Math.max(0, idsOf().indexOf(playing)); // le chant en cours reste le même
         html(sh.querySelector('.ytlist'), ''); draw();
-        if (!player && !fallback) makePlayer();
         toast('Lien ajouté à la fiche du chant');
       });
     }
   });
-  // Fermer la fenêtre arrête la vidéo
-  const obs = new MutationObserver(() => { if (!sh.isConnected) { try { player && player.destroy(); } catch (er) {} obs.disconnect(); } });
+  // Fermer la fenêtre arrête la lecture
+  const obs = new MutationObserver(() => { if (!sh.isConnected) { audio.pause(); audio.removeAttribute('src'); try { player && player.destroy(); } catch (er) {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 }
-$('#set-yt').onclick = () => { const s = curSet(); if (s) ytSheet(s); };
+$('#set-yt').onclick = () => { const s = curSet(); if (s) listenSheet(s); };
+
+// ---------- Importer un fichier audio (version de référence ou répétition) ----------
+function importAudio(input, parentOf, titleOf) {
+  input.addEventListener('change', async () => {
+    const f = input.files && input.files[0]; input.value = '';
+    const p = parentOf(); if (!f || !p) return;
+    if (!/^audio\//.test(f.type) && !/\.(mp3|m4a|aac|wav|ogg|flac|opus)$/i.test(f.name)) { toast('Ce fichier n\'est pas un fichier audio.'); return; }
+    if (f.size > 45 * 1024 * 1024) { toast('Fichier trop lourd (45 Mo maximum).'); return; }
+    const type = f.type || ({ mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', opus: 'audio/ogg' })[(f.name.split('.').pop() || '').toLowerCase()] || 'audio/mpeg';
+    const blob = new Blob([await f.arrayBuffer()], { type });
+    const u = URL.createObjectURL(blob);
+    const d = await new Promise(res => { const a = new Audio(); a.preload = 'metadata'; a.onloadedmetadata = () => res(isFinite(a.duration) ? a.duration : 0); a.onerror = () => res(0); a.src = u; setTimeout(() => res(0), 5000); });
+    const id = uid();
+    await putAudio({ id, blob, d });
+    urls[id] = u; memBlob(id, blob);
+    newRec(p.id, p.team, '')(id, d, titleOf(p) || clean(f.name.replace(/\.[^.]+$/, '')));
+    toast('Fichier audio ajouté');
+  });
+}
+$('#s-imp').onclick = () => $('#s-file').click();
+$('#it-imp').onclick = () => $('#it-file').click();
+importAudio($('#s-file'), curSong, s => clean(s.title || '') ? clean(s.title) + ' – référence' : '');
+importAudio($('#it-file'), () => (curItem() || {}).it, () => { const c = curItem(); return c ? itemRecTitles(c)[0] : ''; });
 
 // ---------- Démarrage ----------
 await migrateLocal();

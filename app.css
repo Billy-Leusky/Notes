@@ -297,3 +297,25 @@ textarea.fld{resize:vertical;line-height:1.4}
 .ytrow.cur .ok-y{color:var(--acc);font-weight:600}
 .ytrow .ok-y{color:var(--acc)}
 .ytframe .ytp,.ytframe>div{position:absolute;inset:0;width:100%;height:100%}
+
+/* ---------- Écouter le set / import audio ---------- */
+.recrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.recbtn.imp{font-weight:500;color:var(--acc)}
+.aplayer{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:4px 0 8px;background:var(--bg);border:1px solid var(--line);border-radius:14px}
+.aplayer .apl{flex:none;width:46px!important;height:46px!important;margin:0!important;border-radius:50%!important;background:var(--acc)!important;color:#fff;display:grid!important;place-items:center}
+.aplayer .apl svg{width:20px;height:20px;fill:currentColor;stroke:none}
+.aplayer .amid{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.aplayer .at{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aplayer .at em{font-style:normal;color:var(--mute);font-weight:400}
+.aplayer .abar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;cursor:pointer}
+.aplayer .abar i{display:block;height:100%;width:0;background:var(--acc)}
+.aplayer .atime{font-size:13px;color:var(--mute);font-variant-numeric:tabular-nums}
+.lrow{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:12px;flex-wrap:wrap;border:2px solid transparent;cursor:pointer}
+.lrow.cur{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--bg))}
+.lrow b{flex:1;min-width:120px;font-weight:600}
+.lrow .srcs{display:flex;gap:6px;flex-wrap:wrap}
+.lrow .src,.lrow a,.lrow .add{width:auto!important;height:32px!important;margin:0!important;padding:0 10px;font-size:13px!important;font-weight:500!important;border-radius:10px;display:inline-flex;align-items:center;background:var(--card);border:1px solid var(--line);color:var(--acc);text-decoration:none}
+.lrow .src.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.lrow .src.off{color:var(--mute);text-decoration:line-through}
+.lrow .none{color:var(--rec);font-size:13px}
+.lrow input{flex-basis:100%;height:38px;border:1px solid var(--line);border-radius:10px;padding:0 10px;font:inherit;font-size:15px;background:var(--card);color:var(--ink)}
