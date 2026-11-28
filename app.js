@@ -1736,20 +1736,29 @@ $('#set-play').onclick = () => { const s = curSet(); if (s) openStage(s, 0); };
 // =====================================================================
 // =====================  Partage d'un set  ============================
 // =====================================================================
-function setText(set) {
+// Texte du set à partager. wa = mise en forme WhatsApp (*gras*, _italique_) ; sinon texte simple.
+function setText(set, wa = true) {
+  const B = t => wa ? '*' + t + '*' : t, It = t => wa ? '_' + t + '_' : t;
   const its = itemsOf(set.id), d = dParse(set.date);
-  const head = '🎵 ' + (clean(set.name || '') || 'Set') + (d ? ' — ' + d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '');
-  const lines = [head, setSummary(set), ''];
+  const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+  const sep = '━━━━━━━━━━━━━━';
+  const L = ['🎵 ' + B((clean(set.name || '') || 'Set').toUpperCase())];
+  if (d) L.push('📅 ' + cap(d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })));
+  L.push('🎶 ' + setSummary(set), sep, '');
   its.forEach((it, i) => {
     const song = songs.get(it.songId), k = itemKey(it), st = itemSt(it);
-    const keyTxt = k ? keyLabel(k) + (it.key && song && song.key && it.key !== song.key ? ' (orig. ' + keyLabel(song.key) + ')' : '') : '';
-    lines.push((i + 1) + '. ' + itemTitle(it) + [keyTxt, song && song.bpm && song.bpm + ' BPM'].filter(Boolean).map(x => ' — ' + x).join(''));
-    if (st.length) lines.push('   ' + st.map(x => secLabel(x) + (x.x > 1 ? ' ×' + x.x : '') + (x.i ? ' (' + x.i + ')' : '')).join(' · '));
-    const extra = [it.lead && 'Lead : ' + it.lead, it.note && '↳ ' + it.note].filter(Boolean).join(' — ');
-    if (extra) lines.push('   ' + extra);
+    if (i) L.push('');
+    L.push(B((i + 1) + '. ' + itemTitle(it)));
+    const keyTxt = k ? keyLabel(k) + (it.key && song && song.key && it.key !== song.key ? ' ' + It('(orig. ' + keyLabel(song.key) + ')') : '') : '';
+    const meta = [keyTxt, song && song.bpm && song.bpm + ' BPM', song && song.sig, song && song.style].filter(Boolean).join(' · ');
+    if (meta) L.push('🎹 ' + meta);
+    if (st.length) L.push('🧩 ' + st.map(x => secLabel(x) + (x.x > 1 ? ' ×' + x.x : '') + (x.i ? ' ' + It('(' + x.i + ')') : '')).join(' → '));
+    if (it.lead) L.push('🎤 ' + it.lead);
+    if (it.note) L.push('💬 ' + It(it.note));
   });
-  if (clean(set.notes || '')) lines.push('', 'Notes : ' + set.notes.trim());
-  return lines.join('\n');
+  if (!its.length) L.push(It('Aucun chant pour l\'instant.'));
+  if (clean(set.notes || '')) L.push('', sep, '📝 ' + B('Notes'), set.notes.trim());
+  return L.join('\n');
 }
 function printSet(set) {
   const its = itemsOf(set.id), d = dParse(set.date);
@@ -1763,15 +1772,23 @@ function printSet(set) {
 }
 $('#set-share').onclick = () => {
   const set = curSet(); if (!set) return;
-  const text = setText(set);
-  const sh = sheet('<p>Partager le set</p><pre class="preview"></pre><button class="ok send">Envoyer (WhatsApp, SMS…)</button><button class="alt copy">Copier le texte</button><button class="alt pdf">PDF / imprimer</button><button class="cancel">Fermer</button>');
-  sh.querySelector('.preview').textContent = text;
+  let wa = pref('shareFmt', 'wa') === 'wa';
+  const sh = sheet('<p>Partager le set</p><div class="seg"><button data-f="wa">WhatsApp</button><button data-f="txt">Texte simple</button></div><pre class="preview"></pre><button class="ok send">Envoyer (WhatsApp, SMS…)</button><button class="alt copy">Copier le texte</button><button class="alt pdf">PDF / imprimer</button><button class="cancel">Fermer</button>');
+  const text = () => setText(set, wa);
+  const draw = () => {
+    sh.querySelectorAll('[data-f]').forEach(x => x.classList.toggle('on', (x.dataset.f === 'wa') === wa));
+    // Aperçu : le gras et l'italique sont montrés comme WhatsApp les affichera
+    const t = esc(text());
+    sh.querySelector('.preview').innerHTML = wa ? t.replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|[\s(])_([^_\n]+)_/g, '$1<i>$2</i>') : t;
+  };
+  draw();
   sh.querySelector('.send').classList.toggle('hidden', !navigator.share);
   sh.addEventListener('click', async e => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b.classList.contains('send')) navigator.share({ text }).catch(() => {});
+    if (b.dataset.f) { wa = b.dataset.f === 'wa'; setPref('shareFmt', wa ? 'wa' : 'txt'); draw(); }
+    else if (b.classList.contains('send')) navigator.share({ text: text() }).catch(() => {});
     else if (b.classList.contains('copy')) {
-      try { await navigator.clipboard.writeText(text); toast('Texte copié : colle-le dans WhatsApp ou un SMS.'); }
+      try { await navigator.clipboard.writeText(text()); toast('Texte copié : colle-le dans WhatsApp ou un SMS.'); }
       catch (er) { const r = document.createRange(); r.selectNodeContents(sh.querySelector('.preview')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Texte sélectionné : copie-le.'); }
     } else if (b.classList.contains('pdf')) { sh.remove(); printSet(set); }
   });

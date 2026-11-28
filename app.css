@@ -260,4 +260,4 @@ textarea.fld{resize:vertical;line-height:1.4}
   #print .notes{margin-top:12pt;border-top:1px solid #ccc;padding-top:8pt;white-space:pre-wrap}
   @page{margin:14mm}
 }
-.sheet .preview{max-height:36vh;overflow:auto;white-space:pre-wrap;font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 0 6px;-webkit-user-select:text;user-select:text}
+.sheet .preview{max-height:40vh;overflow:auto;white-space:pre-wrap;font:14px/1.5 -apple-system,system-ui,sans-serif;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 0 6px;-webkit-user-select:text;user-select:text}
