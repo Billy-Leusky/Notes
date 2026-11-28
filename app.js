@@ -1171,7 +1171,7 @@ function render(fresh) {
 function renderTab() {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#h1').textContent = { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab];
-  $('#space').classList.toggle('hidden', tab === 'notes' || (!teams.length && !space));
+  $('#space').classList.toggle('hidden', tab === 'notes' || (!user && !teams.length));
   $('#space span').textContent = spaceName(space);
   $('#q').placeholder = { sets: 'Rechercher un set ou un chant', songs: 'Rechercher un chant, un auteur, un style', notes: 'Rechercher' }[tab];
   $('#new').setAttribute('aria-label', { sets: 'Nouveau set', songs: 'Nouveau chant', notes: 'Nouvelle note' }[tab]);
