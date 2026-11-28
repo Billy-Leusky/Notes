@@ -438,6 +438,7 @@ function stopRec() {
 // Notes : table « notes » (dernière modification gagne). Audio : bucket « audio », dossier = utilisateur.
 // Une note supprimée devient une « pierre tombale » (deleted) pour que la suppression se propage.
 const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+let changedIds = new Set();
 let user = null, syncing = null, syncT, lastSync = 0, syncErr = '', syncStage = '', audioErr = '';
 async function removeNote(n, recIds) {
   for (const id of recIds) await delAudio(id);
@@ -456,7 +457,7 @@ function syncUI() {
   c.classList.toggle('on', !!user); c.classList.toggle('busy', !!syncing); c.classList.toggle('err', !!(user && syncErr));
   $('#sync').textContent = !user ? '' : syncErr ? '· erreur de synchro' : !navigator.onLine ? '· hors ligne' : lastSync ? '· synchronisé ' + new Date(lastSync).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
 }
-function syncSoon(ms = 2000) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
+function syncSoon(ms = 700) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
 function sync() {
   if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
   if (syncing) return syncing.then(() => sync());
@@ -467,26 +468,40 @@ function sync() {
   return syncing;
 }
 const KINDS = { note: 'notes', song: 'songs', set: 'sets' };
-const strip = o => { const { id, updated, synced, deleted, ...d } = o; return d; };
+// Contenu d'un document sans ses métadonnées de synchro
+// (base = contenu tel qu'il était à la dernière synchro, pour savoir quels champs ont changé ici)
+const strip = o => { const { id, updated, synced, deleted, base, ...d } = o; return d; };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Champs modifiés sur cet appareil depuis la dernière synchro
+const localKeys = o => o && o.base ? Object.keys(strip(o)).filter(k => !same(o[k], o.base[k])) : o ? Object.keys(strip(o)) : [];
 async function doSync() {
   const { data: remote, error } = await sb.from('docs').select('id,kind,data,updated,deleted');
   if (error) throw error;
-  let changed = false; audioErr = '';
+  await flush();
+  let changed = false; audioErr = ''; changedIds = new Set();
   for (const [kind, st] of Object.entries(KINDS)) {
     const local = new Map((await all(st)).map(n => [n.id, n]));
     const rows = remote.filter(r => r.kind === kind), rmap = new Map(rows.map(r => [r.id, r]));
     // 1. Réception : documents plus récents sur le serveur
     for (const r of rows) {
       const l = local.get(r.id);
-      if (l && l.updated >= r.updated) continue;
-      if ((cur && cur.id === r.id && touched) || editTouched.has(r.id)) continue; // en cours d'édition ici
+      // Rien de nouveau sur le serveur depuis notre dernière synchro
+      if (l && (l.synced === r.updated || (l.synced == null && l.updated >= r.updated))) continue;
+      if (kind === 'note' && cur && cur.id === r.id && touched) continue; // note en cours d'écriture ici
       if (r.deleted) {
         if (l) { for (const id of audioIdsOf(st, l)) await delAudio(id); await put(st, { id: r.id, deleted: true, updated: r.updated, synced: r.updated }); changed = true; }
         continue;
       }
       syncStage = 'réception ' + kind;
-      const n = { ...r.data, id: r.id, updated: r.updated, synced: r.updated };
-      await put(st, n); changed = true;
+      const n = { ...r.data, id: r.id, updated: r.updated, synced: r.updated, base: r.data };
+      // Modifié des deux côtés : on prend la version du serveur et on y garde les champs modifiés ici
+      if (l && !l.deleted && l.synced !== l.updated) {
+        const keys = localKeys(l);
+        for (const k of keys) n[k] = l[k];
+        if (keys.length) n.updated = Math.max(Date.now(), r.updated + 1);
+      }
+      await put(st, n); changed = true; changedIds.add(r.id);
+      local.set(r.id, n);
       if (kind === 'note' && cur && cur.id === n.id && !touched) { const sc = $('.scroller').scrollTop; await openNote(n); $('.scroller').scrollTop = sc; }
     }
     // 2. Envoi : documents modifiés ici depuis la dernière synchro
@@ -511,9 +526,9 @@ async function doSync() {
       const { error: e } = await sb.from('docs').upsert(row);
       if (e) throw e;
       const fresh = await get(st, l.id);
-      if (fresh && fresh.updated === l.updated) await put(st, { ...fresh, synced: l.updated });
+      if (fresh && fresh.updated === l.updated) await put(st, { ...fresh, synced: l.updated, base: strip(l) });
       const mem = st === 'songs' ? songs.get(l.id) : st === 'sets' ? sets.get(l.id) : st === 'notes' && cur && cur.id === l.id ? cur : null;
-      if (mem && mem.updated === l.updated) mem.synced = l.updated;
+      if (mem && mem.updated === l.updated) { mem.synced = l.updated; mem.base = strip(l); }
     }
   }
   // 3. Audios manquants sur cet appareil : téléchargés à part, un échec ne bloque pas la synchro
@@ -579,8 +594,21 @@ $('#cloud').onclick = cloudSheet;
 if (sb) {
   sb.auth.onAuthStateChange((ev, session) => {
     const was = user && user.id; user = session ? session.user : null;
+    if ((user && user.id) !== was) live();
     if (user && user.id !== was) sync(); else syncUI();
   });
+  // Temps réel : dès qu'un autre appareil enregistre une modification, Supabase prévient
+  // cet appareil, qui se synchronise aussitôt (sans recharger la page)
+  let rt = null;
+  function live() {
+    if (rt) { try { sb.removeChannel(rt); } catch (e) {} rt = null; }
+    if (!user) return;
+    try {
+      rt = sb.channel('docs-' + user.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'docs', filter: 'user_id=eq.' + user.id }, () => syncSoon(300))
+        .subscribe(st => { if (st === 'SUBSCRIBED') syncSoon(100); });
+    } catch (e) { rt = null; console.warn('temps réel indisponible', e); } // la synchro classique continue
+  }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSoon(100); });
   addEventListener('online', () => syncSoon(100)); addEventListener('offline', syncUI);
   setInterval(() => { if (!document.hidden) sync(); }, 30000);
@@ -604,8 +632,24 @@ if (!['sets', 'songs', 'notes'].includes(tab)) tab = 'sets';
 
 // ---------- Données en mémoire ----------
 async function loadDocs() {
-  songs = new Map((await all('songs')).filter(o => !o.deleted).map(o => [o.id, o]));
-  sets = new Map((await all('sets')).filter(o => !o.deleted).map(o => [o.id, o]));
+  for (const [st, map] of [['songs', songs], ['sets', sets]]) {
+    const seen = new Set();
+    for (const o of await all(st)) {
+      if (o.deleted) continue;
+      seen.add(o.id);
+      const m = map.get(o.id);
+      if (!m) { map.set(o.id, o); continue; }
+      // Mise à jour sur place (les écrans ouverts gardent le même objet).
+      // Si une saisie n'est pas encore enregistrée, on garde les champs modifiés ici.
+      const keep = pend.has(st + ':' + o.id) ? localKeys(m) : [];
+      const kept = {}; for (const k of keep) kept[k] = m[k];
+      const upd = m.updated;
+      for (const k of Object.keys(m)) if (!(k in o)) delete m[k];
+      Object.assign(m, o, kept);
+      if (keep.length) m.updated = Math.max(upd, o.updated);
+    }
+    for (const id of [...map.keys()]) if (!seen.has(id) && !pend.has(st + ':' + id)) map.delete(id);
+  }
   refreshStyles();
 }
 // Enregistrement différé (400 ms) des chants / sets modifiés
@@ -819,7 +863,7 @@ function render(fresh) {
 function refreshAfterSync() {
   const t = topNav();
   if (!t) { if (!$('#list').classList.contains('hidden')) renderTab(); return; }
-  if (editTouched.has(t.id)) return;
+  if (!changedIds.has(t.id) && t.v === 'song') return;
   if (!(t.v === 'song' ? songs : sets).has(t.id)) { nav.pop(); render(); return; }
   t.scroll = $('#' + t.v + ' .scroller').scrollTop; render();
 }
@@ -869,14 +913,17 @@ function renderSets() {
     || `<div class="empty">${q ? 'Aucun résultat' : 'Aucun set.<br>Touchez + pour préparer le premier.'}</div>`;
 }
 
+// Écrit une valeur dans un champ seulement si elle a changé (le curseur ne saute pas pendant la saisie)
+function setV(sel, v) { const e = $(sel); v = v == null ? '' : String(v); if (e.value !== v) e.value = v; }
+
 // ---------- Fiche d'un chant ----------
 const curSong = () => { const t = topNav(); return t && t.v === 'song' ? songs.get(t.id) : null; };
 function renderSong(t) {
   const s = songs.get(t.id); if (!s) { nav.pop(); return render(); }
-  $('#s-title').value = s.title || ''; $('#s-artist').value = s.artist || '';
+  setV('#s-title', s.title || ''); setV('#s-artist', s.artist || '');
   $('#s-key').textContent = s.key ? keyLabel(s.key) : '—';
-  $('#s-bpm').value = s.bpm || ''; $('#s-sig').value = s.sig || ''; $('#s-dur').value = s.dur ? fmt(s.dur) : '';
-  $('#s-style').value = s.style || ''; $('#s-links').value = s.links || ''; $('#s-notes').value = s.notes || '';
+  setV('#s-bpm', s.bpm || ''); setV('#s-sig', s.sig || ''); setV('#s-dur', s.dur ? fmt(s.dur) : '');
+  setV('#s-style', s.style || ''); setV('#s-links', s.links || ''); setV('#s-notes', s.notes || '');
   drawLinks(s); songSt.draw();
   renderRecs($('#s-recs'), s.recs, arr => { s.recs = arr; touch('songs', s); },
     () => [clean(s.title || ''), clean(s.title || '') + (s.key ? ' – ' + keyLabel(s.key) : ''), clean(s.title || '') + ' – répétition', clean(s.title || '') + ' – voix guide']);
@@ -927,7 +974,7 @@ $('#s-del').onclick = () => {
 const curSet = () => { const t = topNav(); return t && (t.v === 'set' || t.v === 'item') ? sets.get(t.id) : null; };
 function renderSet(t) {
   const s = sets.get(t.id); if (!s) { nav.pop(); return render(); }
-  $('#set-name').value = s.name || ''; $('#set-date').value = s.date || ''; $('#set-notes').value = s.notes || '';
+  setV('#set-name', s.name || ''); setV('#set-date', s.date || ''); setV('#set-notes', s.notes || '');
   drawItems(s);
   if (t.focus) { t.focus = false; setTimeout(() => $('#set-name').focus(), 60); }
 }
@@ -1011,7 +1058,7 @@ function renderItem() {
   $('#it-open').classList.toggle('hidden', !song);
   $('#it-info').textContent = song ? [song.key && 'Tonalité d\'origine : ' + keyLabel(song.key), song.bpm && song.bpm + ' BPM', song.sig, song.style].filter(Boolean).join(' · ') : 'Ce chant a été supprimé de la bibliothèque.';
   drawItemKey(c);
-  $('#it-lead').value = it.lead || ''; $('#it-note').value = it.note || '';
+  setV('#it-lead', it.lead || ''); setV('#it-note', it.note || '');
   $('#it-reset').classList.toggle('hidden', !it.struct);
   itSt.draw();
   renderRecs($('#it-recs'), it.recs, arr => { it.recs = arr; touch('sets', set); }, () => itemRecTitles(c));
