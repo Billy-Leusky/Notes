@@ -1,20 +1,22 @@
--- Configuration Supabase pour la synchronisation de l'app Notes.
+-- Configuration Supabase pour la synchronisation de l'app (notes, chants, sets).
 -- À coller dans Supabase : SQL Editor > New query > Run.
+-- Le script peut être relancé sans risque.
 
--- Table des notes (une ligne par note ; chaque utilisateur ne voit que les siennes)
-create table if not exists public.notes (
+-- Table des documents : une ligne par note, chant ou set.
+-- « data » contient le document lui-même ; chaque utilisateur ne voit que les siens.
+-- (team_id servira à l'étape 2 : partage avec l'équipe.)
+create table if not exists public.docs (
   id text primary key,
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
-  title text not null default '',
-  html text not null default '',
-  text text not null default '',
-  recs int not null default 0,
+  team_id uuid,
+  kind text not null check (kind in ('note', 'song', 'set')),
+  data jsonb not null default '{}'::jsonb,
   updated bigint not null,
   deleted boolean not null default false
 );
-alter table public.notes enable row level security;
-drop policy if exists "notes perso" on public.notes;
-create policy "notes perso" on public.notes for all to authenticated
+alter table public.docs enable row level security;
+drop policy if exists "docs perso" on public.docs;
+create policy "docs perso" on public.docs for all to authenticated
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Espace de stockage privé pour les enregistrements audio (un dossier par utilisateur)

@@ -6,106 +6,26 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Notes">
+<meta name="apple-mobile-web-app-title" content="Sets">
 <meta name="theme-color" content="#f6f5f2">
-<title>Notes</title>
-<style>
-:root{--bg:#f6f5f2;--card:#fff;--ink:#1d1d1f;--mute:#8a8a8e;--line:#e6e4df;--acc:#f0761a;--rec:#e5383b}
-@media(prefers-color-scheme:dark){:root{--bg:#111;--card:#1e1e1f;--ink:#f2f2f2;--mute:#9a9a9f;--line:#2c2c2e}}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:17px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
-button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
-svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.view{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
-.hidden{display:none!important}
-.top{padding:28px 20px 8px}
-.top h1{margin:0;font-size:34px;line-height:1.1}
-.top p{margin:4px 0 0;color:var(--mute);font-size:15px}
-.top .ver{font-size:12px;opacity:.7}
-.top{display:flex;align-items:flex-start;gap:12px}
-.top>div{flex:1;min-width:0}
-.cloud{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;background:var(--card);border:1px solid var(--line);color:var(--mute);margin-top:2px;position:relative}
-.cloud.on{color:var(--acc)}
-.cloud.err::after{content:"";position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;background:var(--rec)}
-.cloud.busy svg{animation:pulse 1s infinite}
-.sheet .row2{display:flex;gap:8px}
-.sheet .row2 button{flex:1}
-.sheet .alt{background:var(--bg)}
-.sheet input+input{margin-top:8px}
-.search{margin:12px 20px 8px;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:0 12px;height:44px}
-.search input{flex:1;border:0;background:none;font:inherit;font-size:16px;color:var(--ink);outline:0;min-width:0}
-.search svg{color:var(--mute);width:18px;height:18px}
-.grid{flex:1;overflow-y:auto;padding:8px 16px calc(110px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;align-content:start}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;text-align:left;display:flex;flex-direction:column;gap:6px;min-height:150px}
-.card b{font-size:16px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card span{font-size:14px;color:var(--mute);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;flex:1}
-.card small{font-size:13px;color:var(--mute);display:flex;align-items:center;gap:4px}
-.card small svg{width:14px;height:14px;color:var(--acc)}
-.empty{grid-column:1/-1;text-align:center;color:var(--mute);padding:60px 20px}
-.fab{position:fixed;right:20px;bottom:calc(24px + env(safe-area-inset-bottom));width:60px;height:60px;border-radius:50%;background:var(--acc);color:#fff;display:grid;place-items:center;box-shadow:0 6px 18px rgba(240,118,26,.4)}
-.fab svg{width:28px;height:28px}
-.bar{display:flex;align-items:center;gap:4px;padding:6px 8px;min-height:52px}
-.bar .sp{flex:1}
-.ib{width:44px;height:44px;display:grid;place-items:center;border-radius:12px;font-size:18px}
-.ib:active{background:var(--line)}
-.ib.on{background:var(--acc);color:#fff}
-.back{display:flex;align-items:center;gap:2px;color:var(--acc);padding:0 8px;height:44px}
-.scroller{flex:1;overflow-y:auto;padding:0 max(20px,calc((100% - 760px) / 2)) 120px}
-#title{width:100%;border:0;background:none;font:inherit;font-size:26px;font-weight:700;color:var(--ink);outline:0;padding:6px 0}
-#title::placeholder{color:var(--mute)}
-#date{font-size:13px;color:var(--mute);margin-bottom:10px}
-#body{outline:0;min-height:50vh;word-wrap:break-word;-webkit-user-select:text;user-select:text}
-#body:empty::before{content:"Commencez à écrire…";color:var(--mute)}
-#body ul{padding-left:22px;margin:4px 0}
-#body .st{color:var(--mute);font-size:15px;font-style:italic;padding-left:10px;border-left:3px solid var(--acc);margin:2px 0}
-.cb{display:inline-block;vertical-align:-3px;width:20px;height:20px;margin-right:8px;border:2px solid var(--mute);border-radius:6px;cursor:pointer;position:relative}
-.cb.on{background:var(--acc);border-color:var(--acc)}
-.cb.on::after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
-#body div:has(>.cb.on){color:var(--mute);text-decoration:line-through}
-.rec{display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:14px;-webkit-user-select:none;user-select:none;text-decoration:none}
-.rec .pl{flex:none;width:40px;height:40px;border-radius:50%;background:var(--acc);color:#fff;display:grid;place-items:center}
-.rec .pl svg{width:18px;height:18px;fill:currentColor;stroke:none}
-.rec .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
-.rec .nm{font-size:15px;font-weight:600;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);max-width:100%}
-.rec .row{display:flex;align-items:center;gap:8px}
-.rec .tr{flex:1;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
-.rec .tr i{display:block;height:100%;width:0;background:var(--acc)}
-.rec .t{font-size:14px;color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap}
-.rec .x,.rec .sh{flex:none;width:32px;height:32px;display:grid;place-items:center;color:var(--mute)}
-.rec .x svg{width:16px;height:16px}
-.rec .sh{color:var(--acc)}
-.rec .sh svg{width:20px;height:20px}
-.tools{display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--line);background:var(--card);padding:4px 8px calc(4px + env(safe-area-inset-bottom))}
-.tools .mic{color:#fff;background:var(--rec);border-radius:50%;width:48px;height:48px}
-.recbar{position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);border-radius:18px;padding:12px 14px;display:flex;align-items:center;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-.dot{width:12px;height:12px;border-radius:50%;background:var(--rec);animation:pulse 1s infinite}
-@keyframes pulse{50%{opacity:.3}}
-.recbar .tm{flex:1;min-width:0;font-variant-numeric:tabular-nums;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.recbar button{background:var(--rec);color:#fff;border-radius:12px;padding:0 16px;height:44px;font-weight:600}
-.recbar .pause{background:transparent;border:1px solid currentColor;color:inherit}
-.toast{position:fixed;left:50%;top:calc(16px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:15px;max-width:90vw;z-index:9;text-align:center}
-.sheet{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;z-index:8}
-.sheet>div{background:var(--card);width:100%;border-radius:20px 20px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom))}
-.sheet p{margin:0 0 12px;font-weight:600;text-align:center}
-.sheet button{display:block;width:100%;height:50px;border-radius:14px;margin-top:8px;font-weight:600}
-.sheet .danger{background:var(--rec);color:#fff}
-.sheet .cancel{background:var(--bg)}
-.sheet .ok{background:var(--acc);color:#fff}
-.sheet input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font:inherit;font-size:16px;background:var(--bg);color:var(--ink);outline:0}
-.sheet small{display:block;margin:14px 0 2px;color:var(--mute);font-size:13px}
-.sheet .lines{max-height:38vh;overflow-y:auto}
-.sheet .lines button{height:auto;min-height:44px;padding:8px 12px;margin-top:6px;text-align:left;font-weight:400;background:var(--bg);border:1px solid var(--line)}
-@media(prefers-reduced-motion:reduce){.dot{animation:none}}
-</style>
+<title>Sets & Notes</title>
+<link rel="stylesheet" href="app.css?v=8">
 </head>
 <body>
+<!-- ========== Accueil : onglets Sets / Chants / Notes ========== -->
 <section id="list" class="view">
-  <div class="top"><div><h1>Notes</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v7</span></p></div><button class="cloud" id="cloud" aria-label="Synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
+  <div class="top"><div><h1 id="h1">Sets</h1><p><span id="count"></span> <span id="sync"></span> <span class="ver">· v8</span></p></div><button class="cloud" id="cloud" aria-label="Réglages et synchronisation"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5z"/></svg></button></div>
   <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Rechercher"></label>
   <div id="grid" class="grid"></div>
-  <button class="fab" id="new" aria-label="Nouvelle note"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="fab" id="new" aria-label="Nouveau"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <nav class="tabs">
+    <button data-tab="sets"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Sets</button>
+    <button data-tab="songs"><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Chants</button>
+    <button data-tab="notes"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></svg>Notes</button>
+  </nav>
 </section>
 
+<!-- ========== Note libre ========== -->
 <section id="editor" class="view hidden">
   <div class="bar">
     <button class="back" id="back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>Notes</button>
@@ -128,551 +48,88 @@ svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-l
   </div>
 </section>
 
+<!-- ========== Fiche d'un chant (bibliothèque) ========== -->
+<section id="song" class="view hidden">
+  <div class="bar">
+    <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Chants</span></button>
+    <span class="sp"></span>
+    <button class="ib" id="s-del" aria-label="Supprimer le chant"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+  </div>
+  <div class="scroller form">
+    <input id="s-title" class="big" placeholder="Titre du chant" autocomplete="off">
+    <input id="s-artist" class="sub" placeholder="Auteur / artiste" autocomplete="off">
+    <div class="fields">
+      <label>Tonalité<button id="s-key" class="fld" type="button"></button></label>
+      <label>Tempo<input id="s-bpm" class="fld" inputmode="numeric" placeholder="BPM" autocomplete="off"></label>
+      <label>Mesure<select id="s-sig" class="fld"><option value="">—</option><option>4/4</option><option>3/4</option><option>6/8</option><option>12/8</option><option>2/4</option></select></label>
+      <label>Durée<input id="s-dur" class="fld" inputmode="numeric" placeholder="4:30" autocomplete="off"></label>
+    </div>
+    <label class="lbl">Style / feel<input id="s-style" class="fld" list="styles" placeholder="Gospel, ballade, pop…" autocomplete="off"></label>
+    <h3>Structure</h3>
+    <div id="s-struct"></div>
+    <h3>Liens</h3>
+    <textarea id="s-links" class="fld" rows="2" placeholder="Un lien par ligne (YouTube, Spotify…)"></textarea>
+    <div id="s-linkview" class="links"></div>
+    <h3>Notes</h3>
+    <textarea id="s-notes" class="fld" rows="3" placeholder="Ex. le pont monte en intensité"></textarea>
+    <h3>Enregistrements de référence</h3>
+    <div id="s-recs" class="recs"></div>
+    <button class="recbtn" id="s-rec" type="button"><span class="rdot"></span>Enregistrer</button>
+    <h3>Utilisé dans</h3>
+    <div id="s-used" class="used"></div>
+  </div>
+</section>
+
+<!-- ========== Un set ========== -->
+<section id="set" class="view hidden">
+  <div class="bar">
+    <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Sets</span></button>
+    <span class="sp"></span>
+    <button class="ib" id="set-dup" aria-label="Dupliquer le set"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg></button>
+    <button class="ib" id="set-del" aria-label="Supprimer le set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+  </div>
+  <div class="scroller form">
+    <input id="set-name" class="big" placeholder="Nom (ex. Culte du dimanche)" autocomplete="off">
+    <div class="fields two">
+      <label>Date<input id="set-date" class="fld" type="date"></label>
+    </div>
+    <p id="set-sum" class="info"></p>
+    <div id="set-items" class="items"></div>
+    <button class="addbtn" id="set-add" type="button">+ Ajouter un chant</button>
+    <h3>Notes du set</h3>
+    <textarea id="set-notes" class="fld" rows="3" placeholder="Infos générales, horaires, consignes…"></textarea>
+  </div>
+</section>
+
+<!-- ========== Un chant dans un set (réglages du jour) ========== -->
+<section id="item" class="view hidden">
+  <div class="bar">
+    <button class="back" data-back><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg><span>Set</span></button>
+    <span class="sp"></span>
+    <button class="ib" id="it-del" aria-label="Retirer du set"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+  </div>
+  <div class="scroller form">
+    <div class="ithead"><span id="it-num" class="num"></span><div><h2 id="it-title"></h2><button id="it-open" class="link" type="button">Voir la fiche du chant ›</button></div></div>
+    <p id="it-info" class="info"></p>
+    <div class="fields two">
+      <label>Tonalité du jour<button id="it-key" class="fld" type="button"></button></label>
+      <label>Lead<input id="it-lead" class="fld" placeholder="Qui chante ?" autocomplete="off"></label>
+    </div>
+    <h3>Structure du jour <button id="it-reset" class="link small" type="button">Rétablir celle du chant</button></h3>
+    <div id="it-struct"></div>
+    <h3>Note / transition</h3>
+    <textarea id="it-note" class="fld" rows="2" placeholder="Ex. enchaîner sans pause, piano seul pendant la prière…"></textarea>
+    <h3>Enregistrements</h3>
+    <div id="it-recs" class="recs"></div>
+    <button class="recbtn" id="it-rec" type="button"><span class="rdot"></span>Enregistrer</button>
+  </div>
+</section>
+
+<datalist id="styles"></datalist>
+
 <div id="recbar" class="recbar hidden"><span class="dot"></span><span class="tm" id="tm">0:00</span><button class="pause" id="pause">Pause</button><button id="stop">Arrêter</button></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script>
-(async () => {
-// ---------- Configuration de la synchronisation (projet Supabase) ----------
-const SB_URL = '';
-const SB_KEY = '';
-const $ = s => document.querySelector(s);
-const body = $('#body');
-const I = {
-  play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
-  pause: '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
-  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
-  share: '<svg viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
-  mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'
-};
-
-function toast(m) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.append(t); setTimeout(() => t.remove(), 3500); }
-function ask(msg, ok) {
-  const s = document.createElement('div'); s.className = 'sheet';
-  s.innerHTML = '<div><p></p><button class="danger">Supprimer</button><button class="cancel">Annuler</button></div>';
-  s.querySelector('p').textContent = msg;
-  s.onclick = e => { if (e.target.classList.contains('danger')) ok(); if (e.target === s || e.target.tagName === 'BUTTON') s.remove(); };
-  document.body.append(s);
-}
-
-// ---------- Stockage (IndexedDB : notes + fichiers audio) ----------
-let db;
-try {
-  db = await new Promise((res, rej) => {
-    const r = indexedDB.open('notes-app', 1);
-    r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('notes', { keyPath: 'id' }); d.createObjectStore('audio', { keyPath: 'id' }); };
-    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-  });
-  navigator.storage?.persist?.();
-} catch (e) { toast('Stockage indisponible sur ce navigateur'); return; }
-const tx = (st, mode, fn) => new Promise((res, rej) => { const t = db.transaction(st, mode), r = fn(t.objectStore(st)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); });
-const allNotes = () => tx('notes', 'readonly', s => s.getAll());
-const putNote = n => tx('notes', 'readwrite', s => s.put(n));
-const delNote = id => tx('notes', 'readwrite', s => s.delete(id));
-const putAudio = a => tx('audio', 'readwrite', s => s.put(a));
-const getAudio = id => tx('audio', 'readonly', s => s.get(id));
-const delAudio = id => tx('audio', 'readwrite', s => s.delete(id));
-
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const fmt = s => { s = Math.round(s || 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const dfmt = t => new Date(t).toLocaleString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-let touched = false, notes = [], cur = null, dirty = false, saveT, range = null, playing = null, rec = null, urls = {}, blobs = {};
-
-// ---------- Liste ----------
-async function renderList() {
-  notes = (await allNotes()).filter(n => !n.deleted).sort((a, b) => b.updated - a.updated);
-  const q = $('#q').value.trim().toLowerCase();
-  const list = notes.filter(n => !q || ((n.title || '') + ' ' + (n.text || '')).toLowerCase().includes(q));
-  $('#count').textContent = notes.length + (notes.length > 1 ? ' notes' : ' note');
-  $('#grid').innerHTML = list.length ? list.map(n => `<button class="card" data-id="${esc(n.id)}"><b>${esc(n.title || 'Sans titre')}</b><span>${esc(n.text || '')}</span><small>${n.recs ? I.mic + esc(n.recs) + ' · ' : ''}${esc(new Date(n.updated).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }))}</small></button>`).join('')
-    : `<div class="empty">${q ? 'Aucun résultat' : 'Aucune note.<br>Touchez + pour commencer.'}</div>`;
-}
-$('#q').addEventListener('input', renderList);
-$('#grid').addEventListener('click', e => { const c = e.target.closest('.card'); if (c) openNote(notes.find(n => n.id === c.dataset.id)); });
-$('#new').onclick = () => openNote({ id: uid(), title: '', html: '', text: '', recs: 0, updated: Date.now() });
-
-// ---------- Éditeur ----------
-async function openNote(n) {
-  cur = n; dirty = false; touched = false; range = null;
-  $('#title').value = n.title || '';
-  body.innerHTML = n.html || '';
-  $('#date').textContent = dfmt(n.updated);
-  $('#list').classList.add('hidden'); $('#editor').classList.remove('hidden');
-  $('.scroller').scrollTop = 0;
-  if (!n.title && !n.html) setTimeout(() => $('#title').focus(), 50);
-  for (const old of body.querySelectorAll('.rec')) {
-    // Reconstruit le lecteur (met aussi à jour les anciens enregistrements sans titre)
-    const c = chip(old.dataset.id, +old.dataset.d || 0, old.dataset.title);
-    old.replaceWith(c);
-    const a = await getAudio(c.dataset.id);
-    if (a) { urls[c.dataset.id] = URL.createObjectURL(a.blob); memBlob(c.dataset.id, a.blob); }
-  }
-}
-function showList() {
-  stopPlay();
-  Object.values(urls).forEach(u => URL.revokeObjectURL(u)); urls = {}; blobs = {};
-  $('#editor').classList.add('hidden'); $('#list').classList.remove('hidden');
-  renderList();
-}
-function sched() { dirty = touched = true; clearTimeout(saveT); saveT = setTimeout(save, 400); }
-async function save() {
-  clearTimeout(saveT);
-  if (!cur || !dirty) return; dirty = false;
-  const a = body.cloneNode(true); a.querySelectorAll('.rec').forEach(resetChip);
-  const b = body.cloneNode(true); b.querySelectorAll('.rec').forEach(r => r.remove());
-  b.querySelectorAll('div,p,li,br').forEach(e => e.before(' '));
-  cur.title = $('#title').value.trim();
-  cur.html = a.innerHTML;
-  cur.text = b.textContent.replace(/\s+/g, ' ').trim();
-  cur.recs = body.querySelectorAll('.rec').length;
-  cur.updated = Date.now();
-  await putNote(cur);
-  $('#date').textContent = dfmt(cur.updated);
-  syncSoon();
-}
-$('#title').addEventListener('input', sched);
-body.addEventListener('input', e => {
-  // Entrée sur une ligne de structure : la nouvelle ligne reste une structure
-  if (e.inputType === 'insertParagraph') {
-    const s = getSelection(), line = s.rangeCount && lineAt(s.getRangeAt(0));
-    const blk = line && line.blk;
-    if (blk && !isSt(blk)) {
-      let prev = blk.previousSibling; while (isRec(prev)) prev = prev.previousSibling;
-      if (isSt(prev)) blk.classList.add('st');
-    }
-    stState();
-  }
-  sched();
-});
-$('#title').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); body.focus(); } });
-document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
-
-$('#back').onclick = async () => {
-  if (rec) await stopRec();
-  await save();
-  if (cur && !cur.title && !(cur.text || '').trim() && !cur.recs && !$('#title').value.trim() && !body.textContent.trim() && !body.querySelector('.rec')) await removeNote(cur, []);
-  cur = null; showList(); syncSoon(300);
-};
-$('#del').onclick = () => ask('Supprimer cette note ?', async () => {
-  if (rec) await stopRec();
-  stopPlay();
-  await removeNote(cur, [...body.querySelectorAll('.rec')].map(r => r.dataset.id));
-  cur = null; dirty = false; showList(); syncSoon(300);
-});
-
-// Sélection / insertion
-document.addEventListener('selectionchange', () => { const s = getSelection(); if (s.rangeCount && body.contains(s.anchorNode)) { range = s.getRangeAt(0).cloneRange(); stState(); } });
-// Le bouton Structure est allumé quand le curseur est sur une ligne de structure
-function stState() {
-  const line = range && lineAt(range);
-  $('[data-cmd=struct]').classList.toggle('on', !!(line && isSt(line.blk)));
-}
-function placeRange() {
-  body.focus();
-  const s = getSelection(); s.removeAllRanges();
-  if (range && body.contains(range.startContainer)) s.addRange(range);
-  else { const r = document.createRange(); r.selectNodeContents(body); r.collapse(false); s.addRange(r); }
-  const r = s.getRangeAt(0);
-  const p = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentNode;
-  const chipEl = p.closest && p.closest('.rec');
-  if (chipEl) { r.setStartAfter(chipEl); r.collapse(true); }
-  return r;
-}
-function caretAt(node, offset) { const r = document.createRange(); r.setStart(node, offset); r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); range = r.cloneRange(); }
-function insertBlock(node) {
-  const r = placeRange(); r.deleteContents();
-  const after = document.createElement('div'); after.innerHTML = '<br>';
-  r.insertNode(after); r.insertNode(node);
-  caretAt(after, 0); sched();
-}
-
-// Barre d'outils (pointerdown bloqué pour garder le clavier ouvert)
-$('.tools').addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });
-$('.tools').addEventListener('click', e => {
-  const b = e.target.closest('[data-cmd]'); if (!b) return;
-  const c = b.dataset.cmd;
-  if (c === 'struct') {
-    toggleStructure(placeRange());
-  } else if (c === 'check') {
-    const r = placeRange(); r.deleteContents();
-    const d = document.createElement('div');
-    d.innerHTML = '<i class="cb" contenteditable="false"></i> ';
-    r.insertNode(d); caretAt(d.lastChild, 1);
-  } else {
-    placeRange();
-    document.execCommand(c === 'list' ? 'insertUnorderedList' : c);
-  }
-  sched();
-});
-
-// Clics dans la note : cases à cocher + lecteurs audio
-body.addEventListener('click', e => {
-  const cb = e.target.closest('.cb');
-  if (cb) { cb.classList.toggle('on'); sched(); return; }
-  const c = e.target.closest('.rec'); if (!c) return;
-  e.preventDefault();
-  if (e.target.closest('.nm')) renameRec(c);
-  else if (e.target.closest('.sh')) shareRec(c);
-  else if (e.target.closest('.x')) {
-    ask('Supprimer cet enregistrement ?', async () => {
-      if (playing && playing.chip === c) stopPlay();
-      c.remove(); await delAudio(c.dataset.id); cloudRemove([c.dataset.id]); sched(); save();
-    });
-  } else if (e.target.closest('.pl')) togglePlay(c);
-});
-
-// ---------- Audio ----------
-function chip(id, d, title) {
-  const c = document.createElement('div');
-  c.className = 'rec'; c.contentEditable = 'false'; c.dataset.id = id; c.dataset.d = d.toFixed(1);
-  c.innerHTML = `<button class="pl" type="button" aria-label="Lire">${I.play}</button><span class="mid"><button class="nm" type="button" aria-label="Renommer"></button><span class="row"><span class="tr"><i></i></span><span class="t">${fmt(d)}</span></span></span><button class="sh" type="button" aria-label="Partager">${I.share}</button><button class="x" type="button" aria-label="Supprimer">${I.x}</button>`;
-  setTitle(c, title);
-  return c;
-}
-function setTitle(c, t) {
-  t = (t || '').replace(/\s+/g, ' ').trim();
-  if (t) c.dataset.title = t; else delete c.dataset.title;
-  c.querySelector('.nm').textContent = t || 'Sans titre';
-}
-
-// ---------- Titres des enregistrements ----------
-const isBlock = n => n.nodeType === 1 && /^(DIV|P|LI|UL|OL|BR|H[1-6]|BLOCKQUOTE)$/.test(n.tagName);
-const isRec = n => n && n.nodeType === 1 && n.classList.contains('rec');
-const clean = s => s.replace(/\s+/g, ' ').trim();
-function textOf(n) { const c = n.cloneNode(true); if (c.querySelectorAll) c.querySelectorAll('.rec').forEach(r => r.remove()); return clean(c.textContent); }
-// Toutes les lignes écrites dans la note (sans doublons)
-function noteLines() {
-  const b = body.cloneNode(true); b.querySelectorAll('.rec,.st').forEach(r => r.remove());
-  b.querySelectorAll('div,p,li,br').forEach(e => e.before('\n'));
-  return [...new Set(b.textContent.split('\n').map(clean).filter(Boolean))];
-}
-// Ligne où se trouve le curseur : son texte + où placer l'enregistrement
-function lineAt(r) {
-  if (!r || !body.contains(r.startContainer)) return null;
-  let n = r.startContainer;
-  if (n === body) { n = body.childNodes[r.startOffset] || body.childNodes[r.startOffset - 1]; if (!n) return null; }
-  const el = n.nodeType === 1 ? n : n.parentNode;
-  if (el.closest('.rec')) return null;
-  const li = el.closest('li');
-  if (li && body.contains(li)) return { text: textOf(li), anchor: li, inside: true, blk: li };
-  let top = n; while (top.parentNode !== body) top = top.parentNode;
-  if (isRec(top) || (top.nodeType === 1 && top.tagName === 'BR')) return null;
-  if (isBlock(top)) return { text: textOf(top), anchor: top, blk: top };
-  let s = top, e = top, t = '';
-  while (s.previousSibling && !isBlock(s.previousSibling)) s = s.previousSibling;
-  while (e.nextSibling && !isBlock(e.nextSibling)) e = e.nextSibling;
-  for (let x = s; ; x = x.nextSibling) { t += x.textContent; if (x === e) break; }
-  const runEnd = e;
-  if (e.nextSibling && e.nextSibling.nodeName === 'BR') e = e.nextSibling;
-  return { text: clean(t), anchor: e, s, e: runEnd };
-}
-const isSt = n => n && n.nodeType === 1 && n.classList.contains('st');
-// Titre du chant au-dessus d'une ligne de structure
-function songAbove(blk) {
-  let x = blk.previousSibling;
-  while (x) {
-    if (isRec(x) || isSt(x) || x.nodeName === 'BR') { x = x.previousSibling; continue; }
-    if (isBlock(x)) { const t = textOf(x); if (t) return t; x = x.previousSibling; continue; }
-    let t = ''; while (x && !isBlock(x)) { t = x.textContent + t; x = x.previousSibling; }
-    if (clean(t)) return clean(t);
-  }
-  return '';
-}
-// Titre proposé pour un enregistrement lancé sur cette ligne
-function lineTitle(line) {
-  if (!line) return '';
-  return isSt(line.blk) ? songAbove(line.blk) : line.text;
-}
-// Marque / démarque la ligne du curseur comme « structure »
-function toggleStructure(r) {
-  const line = lineAt(r);
-  if (!line) { toast('Place le curseur sur une ligne'); return; }
-  let blk = line.blk;
-  if (!blk) { // ligne de texte « nue » : on l'emballe dans un bloc
-    blk = document.createElement('div');
-    line.s.before(blk);
-    let x = line.s; for (;;) { const nx = x.nextSibling, last = x === line.e; blk.append(x); if (last) break; x = nx; }
-    if (blk.nextSibling && blk.nextSibling.nodeName === 'BR') blk.nextSibling.remove();
-    const sr = document.createRange(); sr.selectNodeContents(blk); sr.collapse(false);
-    getSelection().removeAllRanges(); getSelection().addRange(sr); range = sr.cloneRange();
-  }
-  blk.classList.toggle('st');
-  if (!blk.classList.length) blk.removeAttribute('class');
-  toast(isSt(blk) ? 'Structure activée' : 'Structure désactivée');
-  stState(); sched();
-}
-// Place l'enregistrement juste sous sa ligne (après les autres enregistrements de cette ligne)
-function insertRec(c, line) {
-  if (!line || !line.anchor.isConnected) return insertBlock(c);
-  if (line.inside) line.anchor.append(c);
-  else { let a = line.anchor; while (isRec(a.nextSibling)) a = a.nextSibling; a.after(c); }
-  if (c.parentNode === body && !c.nextSibling) { const d = document.createElement('div'); d.innerHTML = '<br>'; c.after(d); }
-  body.focus();
-  caretAt(c.parentNode, [...c.parentNode.childNodes].indexOf(c) + 1);
-  sched();
-}
-function renameRec(c) {
-  const s = document.createElement('div'); s.className = 'sheet';
-  s.innerHTML = '<div><p>Titre de l\'enregistrement</p><input class="ti" placeholder="Titre" enterkeyhint="done"><small></small><div class="lines"></div><button class="ok">Enregistrer</button><button class="cancel">Annuler</button></div>';
-  const inp = s.querySelector('.ti'); inp.value = c.dataset.title || '';
-  const lines = noteLines();
-  s.querySelector('small').textContent = lines.length ? 'Ou choisir une ligne de la note :' : '';
-  const box = s.querySelector('.lines');
-  for (const l of lines) { const b = document.createElement('button'); b.className = 'line'; b.textContent = l; box.append(b); }
-  const done = t => { setTitle(c, t); sched(); save(); s.remove(); };
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } });
-  s.addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (e.target === s || (b && b.classList.contains('cancel'))) s.remove();
-    else if (b && b.classList.contains('line')) done(b.textContent);
-    else if (b && b.classList.contains('ok')) done(inp.value);
-  });
-  document.body.append(s);
-}
-// ---------- Partage (le fichier porte le titre de l'enregistrement) ----------
-// Copie en mémoire de l'audio : Safari refuse parfois de partager un fichier lu depuis IndexedDB
-const baseType = t => (t || 'audio/mp4').split(';')[0].trim();
-async function memBlob(id, blob) {
-  blobs[id] = blob;
-  try { const buf = await blob.arrayBuffer(); if (blobs[id] === blob) blobs[id] = new Blob([buf], { type: baseType(blob.type) }); } catch (e) {}
-}
-// Fichiers candidats : chaque plateforme n'accepte que certains couples type/extension
-// (Chrome Android refuse « audio/mp4 » mais accepte « audio/x-m4a » ; Safari accepte « audio/mp4 »)
-function recFiles(c) {
-  const blob = blobs[c.dataset.id]; if (!blob) return [];
-  const type = baseType(blob.type);
-  const base = ((c.dataset.title || 'Enregistrement').replace(/[\/\\:*?"<>|]+/g, '-').trim().slice(0, 80) || 'Enregistrement');
-  const opts = /webm/.test(type) ? [['audio/webm', 'webm'], ['audio/webm', 'weba'], ['video/webm', 'webm']]
-    : /ogg/.test(type) ? [['audio/ogg', 'ogg']]
-    : [['audio/mp4', 'm4a'], ['audio/x-m4a', 'm4a'], ['video/mp4', 'mp4']];
-  return opts.map(([t, ext]) => new File([blob], base + '.' + ext, { type: t }));
-}
-function recFile(c) {
-  const fs = recFiles(c); if (!fs.length) return null;
-  return (navigator.canShare && fs.find(f => navigator.canShare({ files: [f] }))) || fs[0];
-}
-function download(f) {
-  const a = document.createElement('a'), u = URL.createObjectURL(f);
-  a.href = u; a.download = f.name; document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(u), 60000);
-}
-function shareRec(c) {
-  const f = recFile(c);
-  if (!f) { toast('Audio introuvable'); return; }
-  if (!f.size) { toast('Cet enregistrement est vide'); return; }
-  if (!(navigator.share && navigator.canShare && navigator.canShare({ files: [f] }))) {
-    shareFallback(c, { name: 'Partage de fichiers non disponible sur ce navigateur' }); return;
-  }
-  // Uniquement le fichier (pas de titre/texte) : c'est ce que Safari accepte le mieux
-  navigator.share({ files: [f] }).catch(e => { if (e.name !== 'AbortError') shareFallback(c, e); });
-}
-// Si le partage échoue : nouvelle tentative (nouveau toucher) ou téléchargement
-function shareFallback(c, err) {
-  const s = document.createElement('div'); s.className = 'sheet';
-  s.innerHTML = '<div><p>Le partage n\'a pas marché</p><small></small><button class="ok">Réessayer le partage</button><button class="dl">Enregistrer le fichier</button><button class="cancel">Annuler</button></div>';
-  s.querySelector('small').textContent = 'Erreur : ' + (err && (err.name + (err.message ? ' – ' + err.message : '')) || 'inconnue');
-  s.querySelector('.dl').style.background = 'var(--bg)';
-  s.addEventListener('click', e => {
-    const b = e.target.closest('button');
-    if (e.target === s || (b && b.classList.contains('cancel'))) { s.remove(); return; }
-    if (!b) return;
-    s.remove();
-    const f = recFile(c); if (!f) return;
-    if (b.classList.contains('dl')) download(f);
-    else navigator.share({ files: [f] }).catch(e2 => { if (e2.name !== 'AbortError') toast('Partage impossible : ' + e2.name + '. Utilise « Enregistrer le fichier ».'); });
-  });
-  document.body.append(s);
-}
-function resetChip(c) {
-  c.querySelector('.pl').innerHTML = I.play;
-  c.querySelector('.tr i').style.width = '0';
-  c.querySelector('.t').textContent = fmt(+c.dataset.d);
-}
-function stopPlay() { if (!playing) return; playing.a.pause(); if (playing.chip.isConnected) resetChip(playing.chip); playing = null; }
-function togglePlay(c) {
-  if (playing && playing.chip === c) { playing.a.paused ? playing.a.play() : playing.a.pause(); return; }
-  stopPlay();
-  const url = urls[c.dataset.id];
-  if (!url) { toast('Audio introuvable'); return; }
-  const a = new Audio(url), d = +c.dataset.d || 1;
-  playing = { a, chip: c };
-  a.onplay = () => c.querySelector('.pl').innerHTML = I.pause;
-  a.onpause = () => c.querySelector('.pl').innerHTML = I.play;
-  a.ontimeupdate = () => { c.querySelector('.tr i').style.width = Math.min(100, a.currentTime / d * 100) + '%'; c.querySelector('.t').textContent = fmt(a.currentTime) + ' / ' + fmt(d); };
-  a.onended = stopPlay;
-  a.play().catch(() => { toast('Lecture impossible'); stopPlay(); });
-}
-
-const elapsed = () => rec.acc + (rec.mr.state === 'recording' ? Date.now() - rec.start : 0);
-const tick = () => { if (rec) $('#tm').textContent = fmt(elapsed() / 1000) + (rec.title ? ' · ' + rec.title : ''); };
-$('#mic').addEventListener('click', async () => {
-  if (rec) return stopRec();
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast("Enregistrement non disponible ici. Ouvre l'app dans Safari, via une adresse https."); return; }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { toast('Accès au micro refusé (Réglages › Safari › Micro)'); return; }
-  stopPlay();
-  const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => MediaRecorder.isTypeSupported(t)) || '';
-  const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-  const chunks = [];
-  mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  // Le titre est la ligne où se trouve le curseur au moment de lancer l'enregistrement
-  // (sur une ligne de structure : titre du chant au-dessus)
-  const line = lineAt(range);
-  const title = lineTitle(line) || 'Enregistrement ' + (body.querySelectorAll('.rec').length + 1);
-  rec = { mr, stream, chunks, start: Date.now(), acc: 0, iv: setInterval(tick, 250), line: line && line.text ? line : null, title };
-  mr.start(1000);
-  $('#pause').textContent = 'Pause';
-  $('#recbar').classList.remove('hidden'); tick();
-});
-$('#pause').onclick = () => {
-  if (!rec) return;
-  if (rec.mr.state === 'recording') { rec.acc += Date.now() - rec.start; rec.mr.pause(); $('#pause').textContent = 'Reprendre'; }
-  else { rec.start = Date.now(); rec.mr.resume(); $('#pause').textContent = 'Pause'; }
-};
-$('#stop').onclick = () => stopRec();
-function stopRec() {
-  return new Promise(res => {
-    const r = rec; if (!r) return res();
-    const dur = elapsed() / 1000;
-    rec = null; clearInterval(r.iv);
-    $('#recbar').classList.add('hidden');
-    r.mr.onstop = async () => {
-      r.stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(r.chunks, { type: r.mr.mimeType || 'audio/mp4' });
-      const id = uid();
-      await putAudio({ id, blob, d: dur });
-      urls[id] = URL.createObjectURL(blob); memBlob(id, blob);
-      insertRec(chip(id, dur, r.title), r.line);
-      await save(); res();
-    };
-    r.mr.stop();
-  });
-}
-
-// ---------- Synchronisation entre appareils (Supabase) ----------
-// Notes : table « notes » (dernière modification gagne). Audio : bucket « audio », dossier = utilisateur.
-// Une note supprimée devient une « pierre tombale » (deleted) pour que la suppression se propage.
-const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
-let user = null, syncing = null, syncT, lastSync = 0, syncErr = '';
-async function removeNote(n, recIds) {
-  for (const id of recIds) await delAudio(id);
-  cloudRemove(recIds);
-  if (n.synced) await putNote({ id: n.id, deleted: true, updated: Date.now() });
-  else await delNote(n.id);
-}
-function cloudRemove(ids) {
-  if (sb && user && ids.length) sb.storage.from('audio').remove(ids.map(id => user.id + '/' + id)).catch(() => {});
-}
-const recIdsOf = html => { const t = document.createElement('template'); t.innerHTML = html || ''; return [...t.content.querySelectorAll('.rec')].map(r => r.dataset.id); };
-function syncUI() {
-  const c = $('#cloud');
-  c.classList.toggle('on', !!user); c.classList.toggle('busy', !!syncing); c.classList.toggle('err', !!(user && syncErr));
-  $('#sync').textContent = !user ? '' : syncErr ? '· erreur de synchro' : !navigator.onLine ? '· hors ligne' : lastSync ? '· synchronisé ' + new Date(lastSync).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-}
-function syncSoon(ms = 2000) { if (!sb || !user) return; clearTimeout(syncT); syncT = setTimeout(sync, ms); }
-function sync() {
-  if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
-  if (syncing) return syncing.then(() => sync());
-  syncing = doSync().then(() => { syncErr = ''; lastSync = Date.now(); }, e => { syncErr = e.message || String(e); console.warn('sync', e); })
-    .finally(() => { syncing = null; syncUI(); });
-  syncUI();
-  return syncing;
-}
-async function doSync() {
-  const { data: remote, error } = await sb.from('notes').select('*');
-  if (error) throw error;
-  const local = new Map((await allNotes()).map(n => [n.id, n]));
-  const rmap = new Map(remote.map(r => [r.id, r]));
-  let changed = false;
-  // 1. Réception : notes plus récentes sur le serveur
-  for (const r of remote) {
-    const l = local.get(r.id);
-    if (l && l.updated >= r.updated) continue;
-    if (cur && cur.id === r.id && touched) continue; // en cours d'édition ici : on garde la version locale
-    if (r.deleted) {
-      if (l) { for (const id of recIdsOf(l.html)) await delAudio(id); await putNote({ id: r.id, deleted: true, updated: r.updated, synced: r.updated }); changed = true; }
-      continue;
-    }
-    for (const id of recIdsOf(r.html)) {
-      if (await getAudio(id)) continue;
-      const { data, error: e } = await sb.storage.from('audio').download(user.id + '/' + id);
-      if (!e && data) await putAudio({ id, blob: data, d: 0, up: true });
-    }
-    const n = { id: r.id, title: r.title, html: r.html, text: r.text, recs: r.recs, updated: r.updated, synced: r.updated };
-    await putNote(n); changed = true;
-    if (cur && cur.id === n.id && !touched) { const st = $('.scroller').scrollTop; await openNote(n); $('.scroller').scrollTop = st; }
-  }
-  // 2. Envoi : notes modifiées ici depuis la dernière synchro
-  for (const l of local.values()) {
-    const r = rmap.get(l.id);
-    if (l.synced === l.updated && r) continue;
-    if (r && r.updated >= l.updated) continue;
-    if (l.deleted && !r) { await delNote(l.id); continue; }
-    if (!l.deleted) for (const id of recIdsOf(l.html)) {
-      const a = await getAudio(id);
-      if (!a || a.up) continue;
-      const { error: e } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
-      if (e) throw e;
-      await putAudio({ ...a, up: true });
-    }
-    const row = { id: l.id, user_id: user.id, title: l.title || '', html: l.html || '', text: l.text || '', recs: l.recs || 0, updated: l.updated, deleted: !!l.deleted };
-    const { error: e } = await sb.from('notes').upsert(row);
-    if (e) throw e;
-    const fresh = (await allNotes()).find(x => x.id === l.id);
-    if (fresh && fresh.updated === l.updated) await putNote({ ...fresh, synced: l.updated });
-    if (cur && cur.id === l.id && cur.updated === l.updated) cur.synced = l.updated;
-  }
-  if (changed && !$('#list').classList.contains('hidden')) renderList();
-}
-// Fenêtre « Synchronisation » : connexion / déconnexion
-function cloudSheet() {
-  const s = document.createElement('div'); s.className = 'sheet';
-  if (!sb) {
-    s.innerHTML = '<div><p>Synchronisation</p><small>' + (SB_URL ? 'Service de synchronisation injoignable. Vérifie ta connexion Internet.' : 'La synchronisation n\'est pas encore configurée.') + '</small><button class="cancel">Fermer</button></div>';
-  } else if (user) {
-    s.innerHTML = '<div><p>Synchronisation</p><small class="who"></small><small class="st"></small><button class="ok now">Synchroniser maintenant</button><button class="alt out">Se déconnecter</button><button class="cancel">Fermer</button></div>';
-    s.querySelector('.who').textContent = 'Connecté : ' + user.email;
-    s.querySelector('.st').textContent = syncErr ? 'Erreur : ' + syncErr : lastSync ? 'Dernière synchro : ' + new Date(lastSync).toLocaleString('fr-FR') : '';
-  } else {
-    s.innerHTML = '<div><p>Synchroniser mes notes</p><small>Connecte-toi avec le même compte sur chaque appareil (téléphone, tablette…).</small><input class="em" type="email" placeholder="E-mail" autocomplete="email"><input class="pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"><button class="ok in">Se connecter</button><button class="alt up">Créer un compte</button><button class="cancel">Annuler</button></div>';
-  }
-  s.addEventListener('click', async e => {
-    const b = e.target.closest('button');
-    if (e.target === s || (b && b.classList.contains('cancel'))) { s.remove(); return; }
-    if (!b) return;
-    if (b.classList.contains('now')) { s.remove(); await sync(); toast(syncErr ? 'Erreur de synchro : ' + syncErr : 'Notes synchronisées'); return; }
-    if (b.classList.contains('out')) { await sb.auth.signOut(); s.remove(); toast('Déconnecté. Les notes restent sur cet appareil.'); return; }
-    const email = s.querySelector('.em').value.trim(), password = s.querySelector('.pw').value;
-    if (!email || password.length < 6) { toast('E-mail et mot de passe (6 caractères min.) requis'); return; }
-    b.disabled = true;
-    const { data, error } = b.classList.contains('up') ? await sb.auth.signUp({ email, password }) : await sb.auth.signInWithPassword({ email, password });
-    b.disabled = false;
-    if (error) { toast(/Invalid login/i.test(error.message) ? 'E-mail ou mot de passe incorrect' : /registered/i.test(error.message) ? 'Ce compte existe déjà : touche « Se connecter »' : 'Erreur : ' + error.message); return; }
-    if (!data.session) { toast('Compte créé. Confirme ton e-mail (lien reçu), puis reviens te connecter.'); return; }
-    s.remove(); toast('Connecté, synchronisation…');
-  });
-  document.body.append(s);
-}
-$('#cloud').onclick = cloudSheet;
-if (sb) {
-  sb.auth.onAuthStateChange((ev, session) => {
-    const was = user && user.id; user = session ? session.user : null;
-    if (user && user.id !== was) sync(); else syncUI();
-  });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSoon(100); });
-  addEventListener('online', () => syncSoon(100)); addEventListener('offline', syncUI);
-  setInterval(() => { if (!document.hidden) sync(); }, 30000);
-}
-syncUI();
-
-renderList();
-})();
-</script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
-
-
-
