@@ -438,7 +438,7 @@ function stopRec() {
 // Notes : table « notes » (dernière modification gagne). Audio : bucket « audio », dossier = utilisateur.
 // Une note supprimée devient une « pierre tombale » (deleted) pour que la suppression se propage.
 const sb = SB_URL && SB_KEY && window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
-let user = null, syncing = null, syncT, lastSync = 0, syncErr = '';
+let user = null, syncing = null, syncT, lastSync = 0, syncErr = '', syncStage = '', audioErr = '';
 async function removeNote(n, recIds) {
   for (const id of recIds) await delAudio(id);
   cloudRemove(recIds);
@@ -460,7 +460,8 @@ function syncSoon(ms = 2000) { if (!sb || !user) return; clearTimeout(syncT); sy
 function sync() {
   if (!sb || !user || !navigator.onLine) { syncUI(); return Promise.resolve(); }
   if (syncing) return syncing.then(() => sync());
-  syncing = doSync().then(() => { syncErr = ''; lastSync = Date.now(); }, e => { syncErr = e.message || String(e); console.warn('sync', e); })
+  syncStage = 'lecture';
+  syncing = doSync().then(() => { syncErr = ''; lastSync = Date.now(); }, e => { syncErr = '[' + syncStage + '] ' + ((e && (e.name && e.name !== 'Error' ? e.name + ' : ' : '') + (e.message || '')) || String(e)); console.warn('sync', e); })
     .finally(() => { syncing = null; syncUI(); });
   syncUI();
   return syncing;
@@ -470,7 +471,7 @@ const strip = o => { const { id, updated, synced, deleted, ...d } = o; return d;
 async function doSync() {
   const { data: remote, error } = await sb.from('docs').select('id,kind,data,updated,deleted');
   if (error) throw error;
-  let changed = false;
+  let changed = false; audioErr = '';
   for (const [kind, st] of Object.entries(KINDS)) {
     const local = new Map((await all(st)).map(n => [n.id, n]));
     const rows = remote.filter(r => r.kind === kind), rmap = new Map(rows.map(r => [r.id, r]));
@@ -483,12 +484,8 @@ async function doSync() {
         if (l) { for (const id of audioIdsOf(st, l)) await delAudio(id); await put(st, { id: r.id, deleted: true, updated: r.updated, synced: r.updated }); changed = true; }
         continue;
       }
+      syncStage = 'réception ' + kind;
       const n = { ...r.data, id: r.id, updated: r.updated, synced: r.updated };
-      for (const id of audioIdsOf(st, n)) {
-        if (await getAudio(id)) continue;
-        const { data, error: e } = await sb.storage.from('audio').download(user.id + '/' + id);
-        if (!e && data) await putAudio({ id, blob: data, d: 0, up: true });
-      }
       await put(st, n); changed = true;
       if (kind === 'note' && cur && cur.id === n.id && !touched) { const sc = $('.scroller').scrollTop; await openNote(n); $('.scroller').scrollTop = sc; }
     }
@@ -498,12 +495,17 @@ async function doSync() {
       if (l.synced === l.updated && r) continue;
       if (r && r.updated >= l.updated) continue;
       if (l.deleted && !r) { await del(st, l.id); continue; }
+      syncStage = 'envoi ' + kind;
       if (!l.deleted) for (const id of audioIdsOf(st, l)) {
-        const a = await getAudio(id);
-        if (!a || a.up) continue;
-        const { error: e } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
-        if (e) throw e;
-        await putAudio({ ...a, up: true });
+        try {
+          const a = await getAudio(id);
+          if (!a || a.up) continue;
+          syncStage = 'envoi audio';
+          const { error: e } = await sb.storage.from('audio').upload(user.id + '/' + id, a.blob, { upsert: true, contentType: baseType(a.blob.type) });
+          if (e) throw e;
+          await putAudio({ ...a, up: true });
+        } catch (e) { audioErr = (e && (e.name ? e.name + ' : ' : '') + (e.message || '')) || String(e); console.warn('audio', id, e); }
+        syncStage = 'envoi ' + kind;
       }
       const row = { id: l.id, user_id: user.id, kind, data: l.deleted ? {} : strip(l), updated: l.updated, deleted: !!l.deleted };
       const { error: e } = await sb.from('docs').upsert(row);
@@ -514,7 +516,23 @@ async function doSync() {
       if (mem && mem.updated === l.updated) mem.synced = l.updated;
     }
   }
-  if (changed) { await loadDocs(); refreshAfterSync(); }
+  // 3. Audios manquants sur cet appareil : téléchargés à part, un échec ne bloque pas la synchro
+  //    (ils seront retentés à la prochaine synchro)
+  syncStage = 'téléchargement audio';
+  let gotAudio = false;
+  for (const st of Object.values(KINDS)) for (const o of await all(st)) {
+    if (o.deleted) continue;
+    for (const id of audioIdsOf(st, o)) {
+      try {
+        if (await getAudio(id)) continue;
+        const { data, error: e } = await sb.storage.from('audio').download(user.id + '/' + id);
+        if (e) throw e;
+        if (data) { await putAudio({ id, blob: new Blob([await data.arrayBuffer()], { type: baseType(data.type) }), d: 0, up: true }); gotAudio = true; }
+      } catch (e) { audioErr = (e && (e.name ? e.name + ' : ' : '') + (e.message || '')) || String(e); console.warn('audio', id, e); }
+    }
+  }
+  if (gotAudio && cur && !touched && !$('#editor').classList.contains('hidden')) { const sc = $('.scroller').scrollTop; await openNote(cur); $('.scroller').scrollTop = sc; }
+  if (changed || gotAudio) { await loadDocs(); refreshAfterSync(); }
 }
 // Fenêtre « Synchronisation » : connexion / déconnexion
 function cloudSheet() {
@@ -524,7 +542,7 @@ function cloudSheet() {
   } else if (user) {
     s.innerHTML = '<div><p>Synchronisation</p><small class="who"></small><small class="st"></small><button class="ok now">Synchroniser maintenant</button><button class="alt out">Se déconnecter</button><button class="cancel">Fermer</button></div>';
     s.querySelector('.who').textContent = 'Connecté : ' + user.email;
-    s.querySelector('.st').textContent = syncErr ? 'Erreur : ' + syncErr : lastSync ? 'Dernière synchro : ' + new Date(lastSync).toLocaleString('fr-FR') : '';
+    s.querySelector('.st').textContent = (syncErr ? 'Erreur : ' + syncErr : lastSync ? 'Dernière synchro : ' + new Date(lastSync).toLocaleString('fr-FR') : '') + (audioErr ? ' — Audio non transféré (réessai automatique) : ' + audioErr : '');
   } else {
     s.innerHTML = '<div><p>Synchroniser mes notes</p><small>Connecte-toi avec le même compte sur chaque appareil (téléphone, tablette…).</small><input class="em" type="email" placeholder="E-mail" autocomplete="email"><input class="pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"><button class="ok in">Se connecter</button><button class="alt up">Créer un compte</button><button class="cancel">Annuler</button></div>';
   }
