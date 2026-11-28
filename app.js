@@ -1264,18 +1264,20 @@ function refreshUI(force) {
 }
 
 // ---------- Navigation entre écrans ----------
-const VIEWS = ['list', 'editor', 'song', 'set', 'item'];
+const VIEWS = ['list', 'editor', 'song', 'set', 'item', 'stage'];
 function showView(v) { VIEWS.forEach(x => $('#' + x).classList.toggle('hidden', x !== v)); }
 const topNav = () => nav[nav.length - 1];
+const scrollerOf = v => $('#' + v + ' .scroller') || $('#' + v + ' .stmain');
 async function go(v, params) {
   await flush();
-  const t = topNav(); if (t) t.scroll = $('#' + t.v + ' .scroller').scrollTop;
+  const t = topNav(); if (t) t.scroll = scrollerOf(t.v).scrollTop;
   nav.push({ v, ...params }); render(true);
 }
 async function goBack() {
   if (rec) await stopRec();
   await flush();
   const t = nav.pop();
+  if (t && t.v === 'stage') closeStage();
   if (t && t.v === 'song') { const s = songs.get(t.id); if (s && !s.ver && !clean(s.title || '') && !s.artist && !s.key && !(s.struct || []).length && !recsOf(s.id).length && !s.notes && !s.links && ![...items.values()].some(i => i.songId === s.id)) remove('song', s); }
   if (t && t.v === 'set') { const s = sets.get(t.id); if (s && !s.ver && !clean(s.name || '') && !itemsOf(s.id).length && !s.notes) remove('set', s); }
   render();
@@ -1288,12 +1290,12 @@ function render(fresh) {
   if (!doc) { nav.pop(); toast('Cet élément a été supprimé.'); return render(); }
   showView(t.v);
   const prev = nav[nav.length - 2];
-  $('#' + t.v + ' [data-back] span').textContent = !prev ? { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab] : { set: 'Set', song: 'Chant', item: 'Retour' }[prev.v];
+  if (t.v !== 'stage') $('#' + t.v + ' [data-back] span').textContent = !prev ? { sets: 'Sets', songs: 'Chants', notes: 'Notes' }[tab] : { set: 'Set', song: 'Chant', item: 'Retour' }[prev.v];
   const ed = canEdit(doc.team);
   $('#' + t.v).classList.toggle('ro', !ed);
   $('#' + t.v).querySelectorAll('.form input, .form textarea, .form select, .form .fld').forEach(e => { if (!e.closest('.mine')) e.disabled = !ed; });
-  ({ song: renderSong, set: renderSet, item: renderItem })[t.v](t);
-  if (fresh) $('#' + t.v + ' .scroller').scrollTop = 0;
+  ({ song: renderSong, set: renderSet, item: renderItem, stage: renderStage })[t.v](t);
+  if (fresh) scrollerOf(t.v).scrollTop = 0;
 }
 
 // ---------- Accueil : onglets ----------
@@ -1600,6 +1602,187 @@ $('#it-rec').onclick = () => {
   const c = curItem(); if (!c) return;
   recToggle(itemRecTitles(c)[0], newRec(c.it.id, c.it.team));
 };
+
+
+// =====================================================================
+// =====================  Mode scène  ==================================
+// =====================================================================
+// Plein écran, gros caractères, toujours sombre. On passe d'un chant à l'autre en balayant,
+// avec les flèches, ou avec une pédale Bluetooth (touches Page suivante / précédente).
+// L'écran reste allumé. Dans une équipe, un responsable peut « Diriger » : les autres membres
+// en mode scène suivent alors automatiquement le chant en cours.
+let wakeLock = null, stageCh = null, stageLead = false, stageFollow = true, stageLeadT = null, leaderSeen = null;
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); }
+    else if (!on && wakeLock) { const w = wakeLock; wakeLock = null; await w.release(); }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { const t = topNav(); if (!document.hidden && t && t.v === 'stage') keepAwake(true); });
+function openStage(set, i = 0) {
+  stageLead = false; stageFollow = true; leaderSeen = null;
+  go('stage', { id: set.id, i });
+  stageJoin(set);
+  keepAwake(true);
+  try { const d = document.documentElement; if (d.requestFullscreen && !document.fullscreenElement) d.requestFullscreen().catch(() => {}); } catch (e) {}
+}
+function closeStage() {
+  keepAwake(false); stageLeave();
+  try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
+}
+function renderStage(t) {
+  const set = sets.get(t.id), its = itemsOf(set.id);
+  $('#st-set').textContent = clean(set.name || '') || 'Set';
+  if (!its.length) {
+    $('#st-pos').textContent = ''; $('#st-title').textContent = 'Aucun chant dans ce set';
+    for (const id of ['#st-key', '#st-orig', '#st-meta', '#st-lead-name', '#st-note', '#st-pnote', '#st-next']) $(id).textContent = '';
+    html($('#st-pills'), ''); $('#st-prev').disabled = $('#st-nextb').disabled = true;
+    return;
+  }
+  t.i = Math.max(0, Math.min(t.i || 0, its.length - 1));
+  const it = its[t.i], song = songs.get(it.songId), k = itemKey(it), nx = its[t.i + 1];
+  $('#st-pos').textContent = 'Chant ' + (t.i + 1) + ' / ' + its.length;
+  $('#st-title').textContent = itemTitle(it);
+  $('#st-key').textContent = k ? keyLabel(k) : '';
+  $('#st-orig').textContent = it.key && song && song.key && it.key !== song.key ? 'orig. ' + keyLabel(song.key) : '';
+  $('#st-meta').textContent = [song && song.bpm && song.bpm + ' BPM', song && song.sig, song && song.style].filter(Boolean).join(' · ');
+  html($('#st-pills'), pillsHTML(itemSt(it)) || '');
+  $('#st-lead-name').textContent = it.lead ? 'Lead : ' + it.lead : '';
+  $('#st-note').textContent = it.note ? '↳ ' + it.note : '';
+  const pn = [pnoteOf(it.id), song && pnoteOf(song.id)].filter(x => x && clean(x.text || '')).map(x => clean(x.text)).join(' · ');
+  $('#st-pnote').textContent = pn ? '✎ ' + pn : '';
+  $('#st-next').textContent = nx ? 'Ensuite : ' + itemTitle(nx) + (itemKey(nx) ? ' — ' + keyLabel(itemKey(nx)) : '') : 'Dernier chant du set';
+  $('#st-prev').disabled = t.i === 0; $('#st-nextb').disabled = !nx;
+  const team = !!(set.team && user && stageCh);
+  $('#st-lead').classList.toggle('hidden', !(team && canEdit(set.team)));
+  $('#st-lead').classList.toggle('on', stageLead);
+  $('#st-lead').textContent = stageLead ? 'Je dirige ✓' : 'Diriger';
+  const leading = leaderSeen && Date.now() - leaderSeen.at < 12000 && !stageLead;
+  $('#st-follow').classList.toggle('hidden', !(team && leading));
+  $('#st-follow').classList.toggle('on', stageFollow);
+  $('#st-follow').textContent = stageFollow ? 'Je suis ✓' : 'Suivre';
+  $('#st-leader').classList.toggle('hidden', !leading);
+  $('#st-leader').textContent = leading ? (memberName(set.team, leaderSeen.by)) + ' dirige le set' + (stageFollow ? '' : ' (tu ne suis pas)') : '';
+}
+function stageGo(d, abs) {
+  const t = topNav(); if (!t || t.v !== 'stage') return;
+  const n = itemsOf(t.id).length; if (!n) return;
+  const i = Math.max(0, Math.min(n - 1, abs != null ? abs : (t.i || 0) + d));
+  if (i === t.i) return;
+  t.i = i;
+  const m = document.querySelector('.stmain'); m.classList.add('fade');
+  setTimeout(() => { render(); m.classList.remove('fade'); m.scrollTop = 0; }, 120);
+  if (stageLead && abs == null) stageSend();
+}
+$('#st-prev').onclick = () => stageGo(-1);
+$('#st-nextb').onclick = () => stageGo(1);
+{
+  let sx = null, sy = 0;
+  $('#stage').addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  $('#stage').addEventListener('touchend', e => {
+    if (sx == null) return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy; sx = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) stageGo(dx < 0 ? 1 : -1);
+  });
+}
+document.addEventListener('keydown', e => {
+  const t = topNav(); if (!t || t.v !== 'stage' || document.querySelector('.sheet')) return;
+  if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); stageGo(1); }
+  else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); stageGo(-1); }
+  else if (e.key === 'Escape') goBack();
+});
+// Diriger / suivre (diffusion en temps réel entre les membres de l'équipe en mode scène)
+function stageJoin(set) {
+  stageLeave();
+  if (!sb || !user || !set.team) return;
+  try {
+    stageCh = sb.channel('stage-' + set.id, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'pos' }, ({ payload }) => {
+        const t = topNav(); if (!t || t.v !== 'stage' || t.id !== set.id || !payload) return;
+        leaderSeen = { by: payload.by, at: Date.now() };
+        if (stageLead && payload.by !== user.id) { stageLead = false; clearInterval(stageLeadT); } // un autre responsable a pris la main
+        if (stageFollow && !stageLead) {
+          const its = itemsOf(set.id), i = its.findIndex(x => x.id === payload.item);
+          const target = i >= 0 ? i : payload.i;
+          if (typeof target === 'number' && target !== t.i) { stageGo(0, target); return; }
+        }
+        render();
+      })
+      .subscribe();
+  } catch (e) { stageCh = null; }
+}
+function stageLeave() {
+  clearInterval(stageLeadT); stageLeadT = null; stageLead = false;
+  if (stageCh) { try { sb.removeChannel(stageCh); } catch (e) {} stageCh = null; }
+}
+function stageSend() {
+  const t = topNav(); if (!stageCh || !t || t.v !== 'stage') return;
+  const it = itemsOf(t.id)[t.i];
+  try { const r = stageCh.send({ type: 'broadcast', event: 'pos', payload: { i: t.i, item: it && it.id, by: user.id } }); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+$('#st-lead').onclick = () => {
+  stageLead = !stageLead;
+  clearInterval(stageLeadT);
+  if (stageLead) { stageSend(); stageLeadT = setInterval(stageSend, 4000); toast('Tu diriges : les membres en mode scène suivent ton défilement.'); }
+  render();
+};
+$('#st-follow').onclick = () => {
+  stageFollow = !stageFollow;
+  render();
+};
+setInterval(() => { const t = topNav(); if (t && t.v === 'stage' && leaderSeen) render(); }, 5000);
+$('#set-play').onclick = () => { const s = curSet(); if (s) openStage(s, 0); };
+
+// =====================================================================
+// =====================  Partage d'un set  ============================
+// =====================================================================
+function setText(set) {
+  const its = itemsOf(set.id), d = dParse(set.date);
+  const head = '🎵 ' + (clean(set.name || '') || 'Set') + (d ? ' — ' + d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '');
+  const lines = [head, setSummary(set), ''];
+  its.forEach((it, i) => {
+    const song = songs.get(it.songId), k = itemKey(it), st = itemSt(it);
+    const keyTxt = k ? keyLabel(k) + (it.key && song && song.key && it.key !== song.key ? ' (orig. ' + keyLabel(song.key) + ')' : '') : '';
+    lines.push((i + 1) + '. ' + itemTitle(it) + [keyTxt, song && song.bpm && song.bpm + ' BPM'].filter(Boolean).map(x => ' — ' + x).join(''));
+    if (st.length) lines.push('   ' + st.map(x => secLabel(x) + (x.x > 1 ? ' ×' + x.x : '') + (x.i ? ' (' + x.i + ')' : '')).join(' · '));
+    const extra = [it.lead && 'Lead : ' + it.lead, it.note && '↳ ' + it.note].filter(Boolean).join(' — ');
+    if (extra) lines.push('   ' + extra);
+  });
+  if (clean(set.notes || '')) lines.push('', 'Notes : ' + set.notes.trim());
+  return lines.join('\n');
+}
+function printSet(set) {
+  const its = itemsOf(set.id), d = dParse(set.date);
+  html($('#print'), `<h1>${esc(clean(set.name || '') || 'Set')}</h1><p class="sub">${esc([d && d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), setSummary(set)].filter(Boolean).join(' · '))}</p>`
+    + its.map((it, i) => {
+      const song = songs.get(it.songId), k = itemKey(it);
+      const meta = [it.key && song && song.key && it.key !== song.key && 'orig. ' + keyLabel(song.key), song && song.bpm && song.bpm + ' BPM', song && song.sig, song && song.style, it.lead && 'Lead : ' + it.lead].filter(Boolean).join(' · ');
+      return `<div class="it"><span class="n">${i + 1}</span><div class="b"><div><span class="t">${esc(itemTitle(it))}</span>${k ? `<span class="k">${esc(keyLabel(k))}</span>` : ''}</div>${meta ? `<div class="m">${esc(meta)}</div>` : ''}${pillsHTML(itemSt(it))}${it.note ? `<div class="m">↳ ${esc(it.note)}</div>` : ''}</div></div>`;
+    }).join('') + (clean(set.notes || '') ? `<div class="notes"><b>Notes :</b> ${esc(set.notes.trim())}</div>` : ''));
+  setTimeout(() => window.print(), 50);
+}
+$('#set-share').onclick = () => {
+  const set = curSet(); if (!set) return;
+  const text = setText(set);
+  const sh = sheet('<p>Partager le set</p><pre class="preview"></pre><button class="ok send">Envoyer (WhatsApp, SMS…)</button><button class="alt copy">Copier le texte</button><button class="alt pdf">PDF / imprimer</button><button class="cancel">Fermer</button>');
+  sh.querySelector('.preview').textContent = text;
+  sh.querySelector('.send').classList.toggle('hidden', !navigator.share);
+  sh.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.classList.contains('send')) navigator.share({ text }).catch(() => {});
+    else if (b.classList.contains('copy')) {
+      try { await navigator.clipboard.writeText(text); toast('Texte copié : colle-le dans WhatsApp ou un SMS.'); }
+      catch (er) { const r = document.createRange(); r.selectNodeContents(sh.querySelector('.preview')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Texte sélectionné : copie-le.'); }
+    } else if (b.classList.contains('pdf')) { sh.remove(); printSet(set); }
+  });
+};
+
+// =====================================================================
+// ==========  Fonctionnement sans Internet (service worker)  ==========
+// =====================================================================
+// L'app elle-même est gardée sur l'appareil : elle s'ouvre même sans réseau. Les modifications
+// faites hors ligne sont envoyées au retour du réseau.
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(e => console.warn('hors ligne indisponible', e));
 
 // ---------- Démarrage ----------
 await migrateLocal();
