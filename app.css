@@ -296,3 +296,4 @@ textarea.fld{resize:vertical;line-height:1.4}
 .ytrow.cur{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--bg))}
 .ytrow.cur .ok-y{color:var(--acc);font-weight:600}
 .ytrow .ok-y{color:var(--acc)}
+.ytframe .ytp,.ytframe>div{position:absolute;inset:0;width:100%;height:100%}

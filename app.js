@@ -1932,46 +1932,98 @@ function ytId(u) { const m = String(u || '').match(/(?:youtu\.be\/|[?&]v=|\/(?:e
 const songYt = song => { for (const u of String((song && song.links) || '').split(/\s+/)) { const id = ytId(u); if (id) return id; } return null; };
 const setYtIds = set => itemsOf(set.id).map(it => songYt(songs.get(it.songId))).filter(Boolean);
 const ytWatch = ids => 'https://www.youtube.com/watch_videos?video_ids=' + ids.join(',');
+// Lecteur YouTube piloté par l'app (interface officielle « IFrame Player API ») : c'est l'app qui
+// lance chaque vidéo et passe au chant suivant à la fin, donc la liste et la vidéo correspondent
+// toujours. Si l'interface ne se charge pas, on revient au lecteur simple.
+let ytApi = null;
+function loadYtApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (ytApi) return ytApi;
+  ytApi = new Promise((res, rej) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) prev(); res(window.YT); };
+    const sc = document.createElement('script');
+    sc.src = 'https://www.youtube.com/iframe_api';
+    sc.onerror = () => { ytApi = null; rej(new Error('YouTube injoignable')); };
+    document.head.append(sc);
+    setTimeout(() => { if (!(window.YT && window.YT.Player)) { ytApi = null; rej(new Error('délai')); } }, 8000);
+  });
+  return ytApi;
+}
 function ytSheet(set) {
-  const sh = sheet('<p>Playlist YouTube</p><div class="ytframe"></div><small class="ys"></small><div class="ytlist"></div><button class="ok open">Ouvrir dans YouTube</button><button class="alt copy">Copier le lien de la playlist</button><button class="cancel">Fermer</button>');
-  let shown = null, start = 0, autoplay = false;
-  const draw = () => {
-    const rows = itemsOf(set.id).map(it => ({ it, song: songs.get(it.songId) })).map(r => ({ ...r, id: songYt(r.song) }));
-    const ids = rows.map(r => r.id).filter(Boolean);
-    if (start >= ids.length) start = 0;
-    const key = ids.join(',') + '@' + start;
-    if (key !== shown) { // le lecteur n'est rechargé que si la liste ou le chant choisi change
-      shown = key;
-      // On démarre au chant choisi, puis la lecture continue avec les chants suivants du set
-      sh.querySelector('.ytframe').innerHTML = ids.length
-        ? `<iframe src="https://www.youtube-nocookie.com/embed/${ids[start]}?playlist=${ids.slice(start + 1).join(',')}&rel=0&playsinline=1${autoplay ? '&autoplay=1' : ''}" title="Playlist YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`
-        : '';
-      sh.querySelector('.ytframe').classList.toggle('hidden', !ids.length);
+  const sh = sheet('<p>Playlist YouTube</p><div class="ytframe"><div class="ytp"></div></div><small class="ys"></small><div class="ytlist"></div><button class="ok open">Ouvrir dans YouTube</button><button class="alt copy">Copier le lien de la playlist</button><button class="cancel">Fermer</button>');
+  let cur = 0, player = null, ready = false, fallback = false, fbShown = null;
+  const bad = new Set(); // vidéos dont la lecture est interdite hors de YouTube
+  const rowsOf = () => itemsOf(set.id).map(it => ({ it, song: songs.get(it.songId) })).map(r => ({ ...r, id: songYt(r.song) }));
+  const idsOf = () => rowsOf().map(r => r.id).filter(Boolean);
+  const box = sh.querySelector('.ytframe');
+  // Lance la vidéo n° i de la liste (dans l'ordre du set)
+  function playAt(i, autoplay) {
+    const ids = idsOf(); if (!ids.length) return;
+    cur = Math.max(0, Math.min(i, ids.length - 1));
+    if (player && ready) { autoplay === false ? player.cueVideoById(ids[cur]) : player.loadVideoById(ids[cur]); }
+    else if (fallback) {
+      const key = ids.join(',') + '@' + cur;
+      if (key !== fbShown) {
+        fbShown = key;
+        box.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${ids[cur]}?rel=0&playsinline=1${autoplay === false ? '' : '&autoplay=1'}" title="Vidéo YouTube" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"></iframe>`;
+      }
     }
-    sh.querySelector('.ys').textContent = ids.length === rows.length ? (ids.length ? ids.length + ' vidéos, dans l\'ordre du set' : 'Aucun chant dans ce set.')
+    draw();
+  }
+  function next() {
+    const ids = idsOf();
+    let n = cur + 1;
+    while (n < ids.length && bad.has(ids[n])) n++;
+    if (n < ids.length) playAt(n, true);
+  }
+  function makePlayer() {
+    const ids = idsOf(); if (!ids.length) return;
+    loadYtApi().then(YT => {
+      if (!sh.isConnected || player) return;
+      player = new YT.Player(sh.querySelector('.ytp'), {
+        host: 'https://www.youtube-nocookie.com', videoId: ids[cur], width: '100%', height: '100%',
+        playerVars: { playsinline: 1, rel: 0 },
+        events: {
+          onReady: () => { ready = true; },
+          onStateChange: e => { if (e.data === YT.PlayerState.ENDED) next(); },
+          onError: () => { const id = idsOf()[cur]; if (id) bad.add(id); draw(); setTimeout(next, 600); },
+        },
+      });
+    }).catch(() => { fallback = true; playAt(cur, false); });
+  }
+  const draw = () => {
+    const rows = rowsOf(), ids = rows.map(r => r.id).filter(Boolean);
+    if (cur >= ids.length) cur = 0;
+    box.classList.toggle('hidden', !ids.length);
+    sh.querySelector('.ys').textContent = ids.length === rows.length ? (ids.length ? ids.length + ' vidéos, dans l\'ordre du set · touche un chant pour le lancer' : 'Aucun chant dans ce set.')
       : ids.length + ' vidéo' + (ids.length > 1 ? 's' : '') + ' sur ' + rows.length + ' chants : ajoute un lien YouTube aux autres.';
     sh.querySelector('.open').classList.toggle('hidden', !ids.length);
     sh.querySelector('.copy').classList.toggle('hidden', !ids.length);
+    let vi = -1;
     html(sh.querySelector('.ytlist'), rows.map((r, i) => {
       const title = itemTitle(r.it), q = encodeURIComponent([title, r.song && r.song.artist].filter(Boolean).join(' '));
-      const vi = r.id ? ids.indexOf(r.id, rows.slice(0, i).filter(x => x.id).length) : -1;
-      return `<div class="ytrow${r.id ? ' play' : ''}${vi === start && r.id ? ' cur' : ''}" data-song="${esc(r.song ? r.song.id : '')}"${r.id ? ` data-vi="${vi}" role="button" tabindex="0"` : ''}><b>${i + 1}. ${esc(title)}</b>`
-        + (r.id ? `<span class="ok-y">${vi === start ? '▶ en cours' : '▶ lire'}</span>` : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
+      if (r.id) vi++;
+      const isCur = r.id && vi === cur, isBad = r.id && bad.has(r.id);
+      return `<div class="ytrow${r.id ? ' play' : ''}${isCur ? ' cur' : ''}" data-song="${esc(r.song ? r.song.id : '')}"${r.id ? ` data-vi="${vi}" role="button" tabindex="0"` : ''}><b>${i + 1}. ${esc(title)}</b>`
+        + (r.id ? (isBad ? `<span class="no-y">lecture interdite ici</span><a href="https://www.youtube.com/watch?v=${r.id}" target="_blank" rel="noopener">Voir sur YouTube</a>` : `<span class="ok-y">${isCur ? '▶ en cours' : '▶ lire'}</span>`)
+          : `<span class="no-y">pas de lien</span><a href="https://www.youtube.com/results?search_query=${q}" target="_blank" rel="noopener">Chercher</a>${r.song && canEdit(r.song.team) ? '<button class="add" type="button">Coller un lien</button>' : ''}`)
         + '</div>';
     }).join(''));
   };
   draw();
+  makePlayer();
   sh.addEventListener('click', async e => {
     // Toucher un chant de la liste : sa vidéo démarre, puis la suite du set
     const row = e.target.closest('.ytrow.play');
     if (row && !e.target.closest('a,button,input')) {
-      start = +row.dataset.vi; autoplay = true; draw();
-      sh.querySelector('.ytframe').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      playAt(+row.dataset.vi, true);
+      box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return;
     }
     const b = e.target.closest('button'); if (!b) return;
-    const ids = setYtIds(set);
-    if (b.classList.contains('open')) window.open(ytWatch(ids.slice(start)), '_blank', 'noopener');
+    const ids = idsOf();
+    if (b.classList.contains('open')) { if (player && ready && player.pauseVideo) player.pauseVideo(); window.open(ytWatch(ids.slice(cur)), '_blank', 'noopener'); }
     else if (b.classList.contains('copy')) { try { await navigator.clipboard.writeText(ytWatch(ids)); toast('Lien de la playlist copié'); } catch (er) { toast(ytWatch(ids)); } }
     else if (b.classList.contains('add')) {
       const row = b.closest('.ytrow'); if (row.querySelector('input')) return;
@@ -1981,12 +2033,18 @@ function ytSheet(set) {
         const song = songs.get(row.dataset.song), id = ytId(inp.value);
         if (!song) return;
         if (!id) { toast('Ce n\'est pas un lien YouTube.'); return; }
+        const playing = idsOf()[cur];
         edit('song', song, { links: [clean(inp.value), song.links || ''].filter(Boolean).join('\n') });
-        shown = null; html(sh.querySelector('.ytlist'), ''); draw();
+        cur = Math.max(0, idsOf().indexOf(playing)); // le chant en cours reste le même
+        html(sh.querySelector('.ytlist'), ''); draw();
+        if (!player && !fallback) makePlayer();
         toast('Lien ajouté à la fiche du chant');
       });
     }
   });
+  // Fermer la fenêtre arrête la vidéo
+  const obs = new MutationObserver(() => { if (!sh.isConnected) { try { player && player.destroy(); } catch (er) {} obs.disconnect(); } });
+  obs.observe(document.body, { childList: true });
 }
 $('#set-yt').onclick = () => { const s = curSet(); if (s) ytSheet(s); };
 
